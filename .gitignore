@@ -1,0 +1,11 @@
+.venv/
+web/node_modules/
+web/dist/
+web/android/
+web/.env.production.local
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+.pytest_cache/
+.mypy_cache/

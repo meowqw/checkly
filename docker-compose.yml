@@ -1,0 +1,67 @@
+version: '3.8'
+
+services:
+  db:
+    image: mysql:8.0
+    container_name: finance_mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-rootpassword}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-finance_manager}
+      MYSQL_USER: ${MYSQL_USER:-finance}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-finance123}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: finance_api
+    working_dir: /workspace
+    restart: always
+    environment:
+      DB_HOST: db
+      DB_PORT: 3306
+      DB_NAME: ${MYSQL_DATABASE:-finance_manager}
+      DB_USER: ${MYSQL_USER:-finance}
+      DB_PASSWORD: ${MYSQL_PASSWORD:-finance123}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-change-me}
+      PROVERKACHEKA_TOKEN: ${PROVERKACHEKA_TOKEN:-}
+      PRODUCT_NORMALIZER: ${PRODUCT_NORMALIZER:-auto}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      GROK_API_KEY: ${GROK_API_KEY:-}
+      GROK_MODEL: ${GROK_MODEL:-grok-3-mini}
+      GROK_BASE_URL: ${GROK_BASE_URL:-https://api.x.ai/v1}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      GROQ_BASE_URL: ${GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/workspace
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - app-network
+    command: >
+      sh -c "alembic upgrade head &&
+             python scripts/seed_categories.py &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+
+volumes:
+  mysql_data:
+
+networks:
+  app-network:
+    driver: bridge
