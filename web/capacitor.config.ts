@@ -2,10 +2,11 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.financemanager.app",
-  appName: "Finance Manager",
+  appName: "Checkly alfa",
   webDir: "dist",
   server: {
-    androidScheme: "https",
+    // http — иначе WebView (https://localhost) блокирует запросы на http://IP:8000
+    androidScheme: "http",
   },
 };
 

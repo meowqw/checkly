@@ -11,6 +11,7 @@ class CategoryDTO(BaseModel):
     parent_id: str | None = None
     icon: str | None = None
     color: str | None = None
+    is_custom: bool = False
     children: list["CategoryDTO"] | None = None
 
 

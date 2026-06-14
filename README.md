@@ -14,7 +14,7 @@ MVP backend для учёта расходов с поддержкой QR-чек
 
 Все суммы хранятся в **копейках** (850 ₽ → `85000`).
 
-## Быстрый старт (Docker)
+## Быстрый старт (Docker, локально)
 
 ```bash
 cp .env.example .env
@@ -22,6 +22,19 @@ cp .env.example .env
 
 docker compose up --build
 ```
+
+## Деплой на Ubuntu (VPS)
+
+Пошаговая инструкция: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**
+
+Кратко:
+
+```bash
+# на сервере: Docker + git clone + .env
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Продакшен: без `--reload`, MySQL не торчит в интернет. **Без домена:** `docker compose -f docker-compose.prod.yml -f docker-compose.prod-ip.yml up -d --build` → `http://IP:8000`. С доменом — Nginx + HTTPS (см. deploy/DEPLOY.md).
 
 API: http://localhost:8000  
 Документация: http://localhost:8000/docs  

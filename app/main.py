@@ -4,6 +4,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from app.api.v1.router import api_router
 from app.config import get_settings
@@ -50,6 +51,12 @@ def create_app() -> FastAPI:
             "Ключи LLM похожи на заглушки — укажите GROK_API_KEY или OPENAI_API_KEY в .env "
             "и выполните: docker compose up -d --force-recreate app"
         )
+    if not settings.app_debug and settings.jwt_secret == "change-me-in-production":
+        logger.warning(
+            "JWT_SECRET не задан — используется небезопасное значение по умолчанию. "
+            "Задайте JWT_SECRET в .env для production."
+        )
+
     app = FastAPI(
         title="Finance Manager API",
         version="1.0.0",
@@ -67,6 +74,17 @@ def create_app() -> FastAPI:
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:
         return JSONResponse(status_code=exc.status_code, content={"error": exc.message})
+
+    @app.exception_handler(IntegrityError)
+    async def integrity_error_handler(_: Request, exc: IntegrityError) -> JSONResponse:
+        logger.warning("IntegrityError: %s", exc.orig)
+        return JSONResponse(status_code=409, content={"error": "Конфликт данных"})
+
+    @app.exception_handler(Exception)
+    async def unhandled_error_handler(_: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled error: %s", exc)
+        message = str(exc) if settings.app_debug else "Внутренняя ошибка сервера"
+        return JSONResponse(status_code=500, content={"error": message})
 
     @app.get("/health")
     def health() -> dict[str, str]:

@@ -1,210 +1,191 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { CalendarDays, Plus, ScanLine } from "lucide-react";
-import {
-  api,
-  formatMoney,
-  type Account,
-  type Transaction,
-  type TransactionDetail,
-} from "@/api/client";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { ScanLine } from "lucide-react";
+import * as data from "@/api/data-service";
+import { formatMoney } from "@/api/client";
+import { useAccounts } from "@/context/AccountsContext";
 import { CategoryProgress } from "@/components/dashboard/CategoryProgress";
-import { CompactMetric } from "@/components/dashboard/CompactMetric";
-import { PeriodButton } from "@/components/dashboard/PeriodButton";
-import { getPeriodRange, toApiDateTimeRange, formatTxDate, type Period } from "@/lib/dates";
-import { buildCategoryDisplayMap, getCategoryGroupName } from "@/lib/categories";
-import { formatStatAmount, loadCategoryStats, type CategoryStat } from "@/lib/stats";
+import { PeriodNavigator } from "@/components/mobile/PeriodNavigator";
+import { TxRow } from "@/components/mobile/TxRow";
+import { Button } from "@/components/ui/button";
+import { getPeriodRange, toApiDateTimeRange, type Period } from "@/lib/dates";
+import { buildCategoryDisplayMap } from "@/lib/categories";
+import { subscribeTransactionsChanged } from "@/lib/data-events";
+import { formatStatAmount, loadCategoryStats, txRowFromList, type CategoryStat } from "@/lib/stats";
 
-type TxRow = {
+type TxRowData = {
   id: string;
-  merchant: string;
-  date: string;
-  amount: string;
+  title: string;
+  amount: number;
+  type: string;
+  occurredAt: string;
   category: string;
 };
 
 export default function DashboardPage() {
+  const { accounts } = useAccounts();
   const [period, setPeriod] = useState<Period>("day");
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
   const [expenses, setExpenses] = useState(0);
   const [income, setIncome] = useState(0);
   const [categories, setCategories] = useState<CategoryStat[]>([]);
-  const [transactions, setTransactions] = useState<TxRow[]>([]);
+  const [transactions, setTransactions] = useState<TxRowData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  const range = useMemo(() => getPeriodRange(period), [period]);
-
-  useEffect(() => {
-    setLoading(true);
-    const params = toApiDateTimeRange(range.from, range.to);
-
-    Promise.all([
-      api.accounts(),
-      api.transactions({ ...params, type: "expense" }),
-      api.transactions({ ...params, type: "income" }),
-      api.categories(),
-    ])
-      .then(async ([accRes, expRes, incRes, catRes]) => {
-        setAccounts(accRes.accounts);
-        const expTotal = expRes.transactions.reduce((s, t) => s + t.amount, 0);
-        const incTotal = incRes.transactions.reduce((s, t) => s + t.amount, 0);
-        setExpenses(expTotal);
-        setIncome(incTotal);
-
-        const displayMap = buildCategoryDisplayMap(catRes.categories);
-        const stats = await loadCategoryStats(expRes.transactions, catRes.categories);
-        setCategories(stats);
-
-        const weekRange = getPeriodRange("week");
-        const weekParams = toApiDateTimeRange(weekRange.from, weekRange.to);
-        const recentRes = await api.transactions({ ...weekParams, type: "expense" });
-        const recent = recentRes.transactions.slice(0, 6);
-        const rows = await Promise.all(recent.map((t) => toTxRow(t, displayMap)));
-        setTransactions(rows);
-      })
-      .finally(() => setLoading(false));
-  }, [range.from.getTime(), range.to.getTime()]);
-
+  const range = useMemo(() => getPeriodRange(period, periodAnchor), [period, periodAnchor.getTime()]);
   const balance = accounts.reduce((s, a) => s + a.balance, 0);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const load = () => {
+      setLoading(true);
+      setError("");
+      const params = toApiDateTimeRange(range.from, range.to);
+      const weekRange = getPeriodRange("week", period === "week" ? periodAnchor : new Date());
+      const weekParams = toApiDateTimeRange(weekRange.from, weekRange.to);
+
+      return Promise.all([
+        data.getCategories(),
+        data.getTransactions(params),
+        data.getTransactions(weekParams),
+      ])
+        .then(([catRes, periodRes, weekRes]) => {
+          if (cancelled) return;
+
+          const periodTx = periodRes.transactions;
+          setExpenses(periodTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0));
+          setIncome(periodTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0));
+
+          const displayMap = buildCategoryDisplayMap(catRes.categories);
+          setCategories(
+            loadCategoryStats(
+              periodTx.filter((t) => t.type === "expense"),
+              catRes.categories
+            )
+          );
+
+          const recent = weekRes.transactions
+            .filter((t) => t.type === "expense")
+            .slice(0, 8);
+          setTransactions(recent.map((t) => txRowFromList(t, displayMap)));
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+
+    void load();
+    const unsub = subscribeTransactionsChanged(() => {
+      if (!cancelled) void load();
+    });
+
+    return () => {
+      cancelled = true;
+      unsub();
+    };
+  }, [range.from.getTime(), range.to.getTime(), period, periodAnchor.getTime()]);
+
   if (loading) {
-    return <p className="py-12 text-center text-neutral-500">Загрузка...</p>;
+    return <p className="py-16 text-center text-sm text-neutral-400">Загрузка...</p>;
+  }
+
+  if (error) {
+    return (
+      <p className="py-16 text-center text-sm text-red-600">
+        {error}
+      </p>
+    );
   }
 
   return (
     <>
-      <header className="mb-6 flex flex-col justify-between gap-4 md:flex-row md:items-center">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Главная</h1>
-          <p className="mt-1 text-neutral-500">Контроль расходов по категориям</p>
-        </div>
-        <div className="flex gap-2">
-          <Link to="/add">
-            <Button variant="outline" className="gap-2">
-              <Plus size={16} /> Добавить трату
-            </Button>
-          </Link>
-          <Link to="/qr">
-            <Button className="gap-2">
-              <ScanLine size={16} /> Сканировать чек
-            </Button>
-          </Link>
-        </div>
-      </header>
-
-      <section className="mb-6 flex flex-col justify-between gap-3 md:flex-row md:items-center">
-        <div className="inline-flex w-fit rounded-2xl border border-neutral-200 bg-white p-1 shadow-sm">
-          <PeriodButton label="День" active={period === "day"} onClick={() => setPeriod("day")} />
-          <PeriodButton label="Неделя" active={period === "week"} onClick={() => setPeriod("week")} />
-          <PeriodButton label="Месяц" active={period === "month"} onClick={() => setPeriod("month")} />
-        </div>
-        <div className="flex w-fit items-center gap-2 rounded-2xl border border-neutral-200 bg-white px-4 py-2 text-sm text-neutral-500 shadow-sm">
-          <CalendarDays size={16} /> {range.label}
+      <section className="mb-5 animate-scale-in">
+        <p className="text-xs text-neutral-400">Общий баланс</p>
+        <p className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">{formatMoney(balance)}</p>
+        <div className="mt-3 flex gap-4 text-sm">
+          <div>
+            <span className="text-neutral-400">Расходы </span>
+            <span className="font-semibold tabular-nums text-neutral-800">{formatMoney(expenses)}</span>
+          </div>
+          <div>
+            <span className="text-neutral-400">Доходы </span>
+            <span className="font-semibold tabular-nums text-brand">{formatMoney(income)}</span>
+          </div>
         </div>
       </section>
 
-      <section className="mb-6 grid grid-cols-1 gap-3 md:grid-cols-3">
-        <CompactMetric title="Расходы" value={formatMoney(expenses)} />
-        <CompactMetric title="Доходы" value={formatMoney(income)} />
-        <CompactMetric title="Остаток" value={formatMoney(balance)} />
-      </section>
+      <PeriodNavigator
+        period={period}
+        anchor={periodAnchor}
+        onPeriodChange={setPeriod}
+        onAnchorChange={setPeriodAnchor}
+        className="mb-4"
+      />
 
-      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
-          <Card>
-            <CardContent>
-              <div className="mb-5 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Категории расходов</h2>
-                <span className="text-sm text-neutral-500">100%</span>
-              </div>
-              {categories.length === 0 ? (
-                <p className="text-sm text-neutral-500">Нет расходов за период</p>
-              ) : (
-                <div className="space-y-4">
-                  {categories.map((c) => (
-                    <CategoryProgress
-                      key={c.name}
-                      name={c.name}
-                      amount={formatStatAmount(c.amount)}
-                      percent={c.percent}
-                    />
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+      {categories.length > 0 && (
+        <section className="mb-5">
+          <div className="mb-3 flex items-center justify-between">
+            <h2 className="section-title">Категории</h2>
+            <span className="text-[11px] text-neutral-400">{formatMoney(expenses)}</span>
+          </div>
+          <div className="space-y-3 stagger-in">
+            {categories.slice(0, 5).map((c) => (
+              <CategoryProgress
+                key={c.name}
+                name={c.name}
+                amount={formatStatAmount(c.amount)}
+                percent={c.percent}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      <section>
+        <div className="mb-2 flex items-center justify-between">
+          <h2 className="section-title">Последние траты</h2>
+          <div className="flex items-center gap-2">
+            <Link to="/qr" className="hidden sm:block">
+              <Button variant="ghost" size="sm" className="gap-1 text-brand">
+                <ScanLine size={14} /> Чек
+              </Button>
+            </Link>
+            <Link to="/transactions" className="text-xs font-medium text-brand">
+              Все
+            </Link>
+          </div>
         </div>
 
-        <div>
-          <Card>
-            <CardContent>
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-lg font-semibold">Последние траты</h2>
-                <Link to="/transactions">
-                  <Button variant="ghost" size="sm">
-                    Все
-                  </Button>
-                </Link>
-              </div>
-              {transactions.length === 0 ? (
-                <p className="text-sm text-neutral-500">Пока нет трат</p>
-              ) : (
-                <div className="space-y-0">
-                  {transactions.map((tx) => (
-                    <div
-                      key={tx.id}
-                      className="flex items-center justify-between border-b py-3 last:border-0"
-                    >
-                      <div>
-                        <div className="text-sm font-medium">{tx.merchant}</div>
-                        <div className="mt-1 text-xs text-neutral-500">{tx.date}</div>
-                      </div>
-                      <div className="text-right">
-                        <div className="text-sm font-semibold">{tx.amount}</div>
-                        <Badge className="mt-1">{tx.category}</Badge>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div>
+        {transactions.length === 0 ? (
+          <div className="py-8 text-center">
+            <p className="text-sm text-neutral-400">Пока нет трат</p>
+            <Link to="/add" className="mt-2 inline-block text-sm font-medium text-brand">
+              Добавить первую
+            </Link>
+          </div>
+        ) : (
+          <div className="list-divider stagger-in">
+            {transactions.map((tx, i) => (
+              <TxRow
+                key={tx.id}
+                title={tx.title}
+                subtitle={tx.category}
+                amount={tx.amount}
+                type={tx.type}
+                occurredAt={tx.occurredAt}
+                colorIndex={i}
+              />
+            ))}
+          </div>
+        )}
       </section>
     </>
   );
-}
-
-async function toTxRow(t: Transaction, displayMap: Map<string, string>): Promise<TxRow> {
-  let merchant = t.comment || "Операция";
-  let category = "Прочее";
-
-  try {
-    const { transaction } = await api.transaction(t.id);
-    if (t.source === "qr_receipt" && transaction.merchant?.name) {
-      merchant = transaction.merchant.name;
-    }
-    category = pickCategory(transaction, displayMap);
-  } catch {
-    if (t.source === "qr_receipt") merchant = "Чек";
-  }
-
-  return {
-    id: t.id,
-    merchant,
-    date: formatTxDate(t.occurred_at),
-    amount: formatMoney(t.amount),
-    category,
-  };
-}
-
-function pickCategory(tx: TransactionDetail, displayMap: Map<string, string>): string {
-  const item = tx.items?.[0];
-  if (item?.category?.name && item.category_id) {
-    return displayMap.get(item.category_id) ?? item.category.name;
-  }
-  return getCategoryGroupName(item?.category_id, displayMap);
 }

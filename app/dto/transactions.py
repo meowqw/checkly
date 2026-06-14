@@ -82,6 +82,7 @@ class TransactionFilterDTO(BaseModel):
     to_date: datetime | None = None
     type: TransactionType | None = None
     account_uid: str | None = None
+    timezone: str = "Europe/Moscow"
 
 
 class CreateManualTransactionDTO(BaseModel):
@@ -93,6 +94,7 @@ class CreateManualTransactionDTO(BaseModel):
     occurred_at: datetime
     category_uid: str | None = None
     comment: str | None = None
+    timezone: str = "Europe/Moscow"
 
 
 class UpdateTransactionDTO(BaseModel):
@@ -103,7 +105,19 @@ class UpdateTransactionDTO(BaseModel):
     comment: str | None = None
 
 
+class UpdateTransactionItemRequestDTO(BaseModel):
+    category_id: str
+
+
+class UpdateTransactionItemDTO(BaseModel):
+    user_id: int
+    transaction_uid: str
+    item_uid: str
+    category_uid: str
+
+
 class CreateTransactionFromReceiptDTO(BaseModel):
     user_id: int
     account_uid: str
     qr: str
+    timezone: str = "Europe/Moscow"

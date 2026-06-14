@@ -53,6 +53,23 @@ class TransactionRepository:
         )
         return list(self._db.scalars(stmt).unique().all())
 
+    def get_item_by_uid_for_user(
+        self, item_uid: str, transaction_uid: str, user_id: int
+    ) -> TransactionItem | None:
+        return self._db.scalar(
+            select(TransactionItem)
+            .join(Transaction, Transaction.id == TransactionItem.transaction_id)
+            .options(
+                joinedload(TransactionItem.category).joinedload(Category.parent),
+                joinedload(TransactionItem.product),
+            )
+            .where(
+                TransactionItem.uid == item_uid,
+                Transaction.uid == transaction_uid,
+                Transaction.user_id == user_id,
+            )
+        )
+
     def create(self, transaction: Transaction) -> Transaction:
         self._db.add(transaction)
         self._db.flush()

@@ -15,8 +15,8 @@ export function MenuItem({ to, icon, label, end }: Props) {
       end={end}
       className={({ isActive }) =>
         cn(
-          "flex items-center gap-3 rounded-2xl px-3 py-2 text-sm transition",
-          isActive ? "bg-neutral-900 text-white" : "text-neutral-600 hover:bg-neutral-100"
+          "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition",
+          isActive ? "bg-brand-muted font-medium text-brand-dark" : "text-neutral-600 hover:bg-neutral-50"
         )
       }
     >

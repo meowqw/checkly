@@ -45,10 +45,12 @@ class Settings(BaseSettings):
             "https://localhost",
             "capacitor://localhost",
             "http://localhost",
+            "http://localhost:8080",
+            "https://localhost:8080",
         ]
         if self.cors_origins.strip():
             origins.extend(o.strip() for o in self.cors_origins.split(",") if o.strip())
-        return origins
+        return list(dict.fromkeys(origins))
 
     @property
     def database_url(self) -> str:

@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "@/components/Layout";
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { AuthProvider } from "@/context/AuthContext";
+import { SyncProvider } from "@/context/SyncContext";
 import AccountsPage from "@/pages/AccountsPage";
 import AddTransactionPage from "@/pages/AddTransactionPage";
 import CategoriesPage from "@/pages/CategoriesPage";
@@ -14,7 +15,8 @@ import TransactionsPage from "@/pages/TransactionsPage";
 export default function App() {
   return (
     <AuthProvider>
-      <Routes>
+      <SyncProvider>
+        <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route element={<ProtectedRoute />}>
           <Route element={<Layout />}>
@@ -28,7 +30,8 @@ export default function App() {
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+        </Routes>
+      </SyncProvider>
     </AuthProvider>
   );
 }

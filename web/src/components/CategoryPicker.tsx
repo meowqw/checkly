@@ -1,26 +1,6 @@
 import type { Category } from "@/api/client";
+import { CategoryIcon } from "@/components/CategoryIcon";
 import { cn } from "@/lib/utils";
-
-const CATEGORY_EMOJI: Record<string, string> = {
-  Продукты: "🛒",
-  Здоровье: "💊",
-  Дом: "🏠",
-  Транспорт: "🚗",
-  Развлечения: "🎬",
-  Одежда: "👕",
-  Связь: "📱",
-  Образование: "📚",
-  Подарки: "🎁",
-  Прочее: "📦",
-  Зарплата: "💰",
-  Подработка: "💼",
-  Возвраты: "↩️",
-  "Прочие доходы": "✨",
-};
-
-function emojiFor(name: string): string {
-  return CATEGORY_EMOJI[name] ?? name.charAt(0).toUpperCase();
-}
 
 type Props = {
   roots: Category[];
@@ -40,10 +20,10 @@ export function CategoryPicker({
   onSubcategoryChange,
 }: Props) {
   return (
-    <div className="space-y-4">
+    <div className="space-y-3">
       <div>
-        <p className="mb-2 text-sm font-medium text-neutral-700">Категория</p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <p className="mb-2 text-xs text-neutral-500">Категория</p>
+        <div className="grid grid-cols-3 gap-1.5">
           {roots.map((cat) => {
             const selected = parentId === cat.id;
             return (
@@ -52,14 +32,23 @@ export function CategoryPicker({
                 type="button"
                 onClick={() => onParentChange(cat.id)}
                 className={cn(
-                  "flex items-center gap-2 rounded-2xl border px-3 py-3 text-left text-sm transition",
+                  "flex flex-col items-center gap-1.5 rounded-xl border px-1 py-2.5 text-center text-xs transition",
                   selected
-                    ? "border-neutral-900 bg-neutral-900 text-white shadow-sm"
-                    : "border-neutral-200 bg-white hover:border-neutral-400 hover:bg-neutral-50"
+                    ? "border-brand bg-brand-muted text-brand-dark"
+                    : "border-neutral-100 bg-neutral-50 text-neutral-700"
                 )}
               >
-                <span className="text-lg leading-none">{emojiFor(cat.name)}</span>
-                <span className="font-medium leading-tight">{cat.name}</span>
+                <CategoryIcon
+                  icon={cat.icon}
+                  color={cat.color}
+                  name={cat.name}
+                  size="sm"
+                  className={selected ? "ring-2 ring-white/80" : undefined}
+                />
+                <span className="line-clamp-2 font-medium leading-tight">{cat.name}</span>
+                {cat.is_custom && (
+                  <span className="text-[10px] font-normal text-neutral-400">Моя</span>
+                )}
               </button>
             );
           })}
@@ -68,10 +57,10 @@ export function CategoryPicker({
 
       {parentId && subcategories.length > 0 && (
         <div>
-          <p className="mb-2 text-sm font-medium text-neutral-700">Подкатегория</p>
-          <div className="flex flex-wrap gap-2">
+          <p className="mb-2 text-xs text-neutral-500">Подкатегория</p>
+          <div className="flex flex-wrap gap-1.5">
             <Chip
-              label="Без уточнения"
+              label="Общая"
               selected={!subcategoryId}
               onClick={() => onSubcategoryChange("")}
             />
@@ -81,14 +70,11 @@ export function CategoryPicker({
                 label={cat.name}
                 selected={subcategoryId === cat.id}
                 onClick={() => onSubcategoryChange(cat.id)}
+                custom={cat.is_custom}
               />
             ))}
           </div>
         </div>
-      )}
-
-      {parentId && subcategories.length === 0 && (
-        <p className="text-xs text-neutral-500">Подкатегорий нет — будет сохранена выбранная категория.</p>
       )}
     </div>
   );
@@ -97,10 +83,12 @@ export function CategoryPicker({
 function Chip({
   label,
   selected,
+  custom,
   onClick,
 }: {
   label: string;
   selected: boolean;
+  custom?: boolean;
   onClick: () => void;
 }) {
   return (
@@ -108,13 +96,12 @@ function Chip({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-4 py-2 text-sm transition",
-        selected
-          ? "border-neutral-900 bg-neutral-900 text-white"
-          : "border-neutral-200 bg-white text-neutral-700 hover:border-neutral-400"
+        "rounded-full px-3 py-1 text-xs font-medium transition",
+        selected ? "bg-brand text-white" : "bg-neutral-100 text-neutral-600"
       )}
     >
       {label}
+      {custom ? " · моя" : ""}
     </button>
   );
 }

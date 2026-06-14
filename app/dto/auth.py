@@ -17,6 +17,7 @@ class UserDTO(BaseModel):
     id: str
     email: str
     login: str
+    timezone: str = "Europe/Moscow"
 
 
 class AuthResponseDTO(BaseModel):

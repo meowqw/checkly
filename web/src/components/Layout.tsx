@@ -1,86 +1,103 @@
 import { useEffect, useState } from "react";
-import { Link, NavLink, Outlet, useLocation } from "react-router-dom";
-import { Home, PieChart, ReceiptText, ScanLine, Settings, Wallet } from "lucide-react";
-import { api, formatMoney, type Account } from "@/api/client";
-import { Card, CardContent } from "@/components/ui/card";
+import { NavLink, Outlet, useLocation } from "react-router-dom";
+import {
+  Home,
+  LayoutGrid,
+  ReceiptText,
+  Settings,
+  Wallet,
+  WifiOff,
+} from "lucide-react";
+import { formatMoney } from "@/api/client";
+import { useAccounts } from "@/context/AccountsContext";
+import { useSync } from "@/context/SyncContext";
 import { MenuItem } from "@/components/dashboard/MenuItem";
+import { FabActionMenu, FabButton } from "@/components/mobile/FabActionMenu";
 import { cn } from "@/lib/utils";
+
+const HIDE_NAV = ["/add", "/qr"];
 
 export default function Layout() {
   const location = useLocation();
-  const [primaryAccount, setPrimaryAccount] = useState<Account | null>(null);
+  const { online, pendingCount, syncing } = useSync();
+  const { primaryAccount } = useAccounts();
+  const [fabOpen, setFabOpen] = useState(false);
+  const hideNav = HIDE_NAV.some((p) => location.pathname.startsWith(p));
 
   useEffect(() => {
-    api.accounts().then((r) => {
-      if (r.accounts[0]) setPrimaryAccount(r.accounts[0]);
-    });
+    setFabOpen(false);
   }, [location.pathname]);
 
   return (
-    <div className="min-h-screen bg-neutral-100 text-neutral-950">
-      <div className="flex min-h-screen pb-20 md:pb-0">
-        <aside className="hidden w-64 flex-col justify-between border-r border-neutral-200 bg-white p-5 md:flex">
+    <div className="min-h-screen bg-white text-neutral-950">
+      <div className="flex min-h-screen">
+        <aside className="hidden w-56 flex-col justify-between border-r border-neutral-100 bg-white p-4 lg:flex">
           <div>
             <Brand />
-            <nav className="mt-8 space-y-1">
+            <nav className="mt-6 space-y-0.5">
               <MenuItem to="/" end icon={<Home size={18} />} label="Главная" />
+              <MenuItem to="/transactions" icon={<ReceiptText size={18} />} label="Операции" />
               <MenuItem to="/accounts" icon={<Wallet size={18} />} label="Счета" />
-              <MenuItem to="/transactions" icon={<ReceiptText size={18} />} label="Транзакции" />
-              <MenuItem to="/categories" icon={<PieChart size={18} />} label="Категории" />
-              <MenuItem to="/settings" icon={<Settings size={18} />} label="Настройки" />
+              <MenuItem to="/categories" icon={<LayoutGrid size={18} />} label="Категории" />
+              <MenuItem to="/settings" icon={<Settings size={18} />} label="Ещё" />
             </nav>
           </div>
 
           {primaryAccount && (
-            <Card className="rounded-2xl shadow-sm">
-              <CardContent className="p-4">
-                <div className="mb-1 text-sm font-medium">{primaryAccount.name}</div>
-                <div className="text-2xl font-semibold">{formatMoney(primaryAccount.balance)}</div>
-                <div className="mt-1 text-xs text-neutral-500">доступный баланс</div>
-              </CardContent>
-            </Card>
+            <div className="rounded-xl bg-brand-muted px-3 py-3 animate-scale-in">
+              <div className="text-xs text-neutral-500">{primaryAccount.name}</div>
+              <div className="mt-0.5 text-lg font-semibold tabular-nums">
+                {formatMoney(primaryAccount.balance)}
+              </div>
+            </div>
           )}
         </aside>
 
-        <main className="flex-1 p-4 md:p-8">
-          <Outlet />
+        <main className="flex-1">
+          {!online && (
+            <div className="animate-fade-in border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-xs text-amber-900">
+              <WifiOff size={14} className="mr-1 inline" />
+              Offline — чеки недоступны. Данные из кэша
+              {pendingCount > 0 && ` · ${pendingCount} ждут синхронизации`}
+            </div>
+          )}
+          {online && pendingCount > 0 && (
+            <div className="animate-fade-in border-b border-brand-light bg-brand-muted px-4 py-2 text-center text-xs text-brand-dark">
+              {syncing ? "Синхронизация…" : `${pendingCount} изменений отправятся на сервер`}
+            </div>
+          )}
+          <div key={location.pathname} className="page-shell animate-page-in">
+            <Outlet />
+          </div>
         </main>
       </div>
 
-      <nav className="fixed bottom-0 left-0 right-0 z-40 flex border-t border-neutral-200 bg-white px-2 py-2 md:hidden">
-        <MobileTab to="/" icon={<Home size={20} />} label="Главная" end />
-        <MobileTab to="/transactions" icon={<ReceiptText size={20} />} label="Операции" />
-        <MobileTab to="/accounts" icon={<Wallet size={20} />} label="Счета" />
-        <MobileTab to="/settings" icon={<Settings size={20} />} label="Ещё" />
-      </nav>
+      <FabActionMenu open={fabOpen && !hideNav} onClose={() => setFabOpen(false)} />
 
-      <div className="fixed bottom-20 right-4 z-50 flex gap-2 md:bottom-4">
-        <Link
-          to="/add"
-          className="flex h-11 w-11 items-center justify-center rounded-2xl border border-neutral-200 bg-white shadow-md"
-        >
-          <ReceiptText size={18} />
-        </Link>
-        <Link
-          to="/qr"
-          className="flex h-11 items-center gap-2 rounded-2xl bg-neutral-900 px-3 text-sm font-medium text-white shadow-md"
-        >
-          <ScanLine size={16} /> Чек
-        </Link>
-      </div>
+      {!hideNav && (
+        <nav className="fixed bottom-0 left-0 right-0 z-40 border-t border-neutral-100 bg-white/95 pb-safe-b backdrop-blur-md lg:hidden">
+          <div className="mx-auto flex max-w-lg items-end px-1 pt-1">
+            <MobileTab to="/" icon={<Home size={20} />} label="Главная" end />
+            <MobileTab to="/transactions" icon={<ReceiptText size={20} />} label="Операции" />
+            <FabButton open={fabOpen} onClick={() => setFabOpen((v) => !v)} />
+            <MobileTab to="/accounts" icon={<Wallet size={20} />} label="Счета" />
+            <MobileTab to="/settings" icon={<Settings size={20} />} label="Ещё" />
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
 
 function Brand() {
   return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-neutral-900 text-white">
-        <ReceiptText size={20} />
+    <div className="flex items-center gap-2.5 px-1">
+      <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-white">
+        <ReceiptText size={18} />
       </div>
       <div>
-        <div className="text-lg font-semibold">Checkly</div>
-        <div className="text-xs text-neutral-500">учёт расходов</div>
+        <div className="text-base font-semibold">Checkly</div>
+        <div className="text-[11px] text-neutral-400">учёт расходов</div>
       </div>
     </div>
   );
@@ -103,8 +120,8 @@ function MobileTab({
       end={end}
       className={({ isActive }) =>
         cn(
-          "flex flex-1 flex-col items-center gap-0.5 rounded-xl py-1 text-[10px]",
-          isActive ? "text-neutral-900" : "text-neutral-500"
+          "flex flex-1 flex-col items-center gap-0.5 py-1.5 text-[10px] font-medium transition-all duration-200",
+          isActive ? "text-brand scale-105" : "text-neutral-400 active:scale-95"
         )
       }
     >

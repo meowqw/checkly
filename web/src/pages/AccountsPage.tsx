@@ -1,106 +1,114 @@
-import { FormEvent, useEffect, useState } from "react";
-import { api, formatMoney, rublesToKopecks, type Account } from "@/api/client";
+import { FormEvent, useState } from "react";
+import * as data from "@/api/data-service";
+import { formatMoney, rublesToKopecks } from "@/api/client";
 import { ApiError } from "@/api/client";
+import { useAccounts } from "@/context/AccountsContext";
+import { PageHeader } from "@/components/mobile/PageHeader";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 
 export default function AccountsPage() {
-  const [accounts, setAccounts] = useState<Account[]>([]);
+  const { accounts, loading: accountsLoading, error: loadError, refresh } = useAccounts();
   const [name, setName] = useState("");
   const [balanceRub, setBalanceRub] = useState("0");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-
-  const load = () => api.accounts().then((r) => setAccounts(r.accounts));
-
-  useEffect(() => {
-    load();
-  }, []);
+  const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
     setError("");
-    setLoading(true);
+    setSaving(true);
     try {
-      await api.createAccount({
+      await data.createAccount({
         name,
         balance: rublesToKopecks(parseFloat(balanceRub) || 0),
       });
       setName("");
       setBalanceRub("0");
-      await load();
+      setShowForm(false);
+      await refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
-      setLoading(false);
+      setSaving(false);
     }
   };
 
   const remove = async (id: string) => {
     if (!confirm("Удалить счёт?")) return;
     try {
-      await api.deleteAccount(id);
-      await load();
+      await data.deleteAccount(id);
+      await refresh();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Ошибка");
     }
   };
 
+  const total = accounts.reduce((s, a) => s + a.balance, 0);
+  const displayError = error || loadError;
+
   return (
     <>
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Счета</h1>
-        <p className="mt-1 text-neutral-500">Управление счетами</p>
-      </header>
+      <PageHeader
+        title="Счета"
+        subtitle={`Всего ${formatMoney(total)}`}
+        action={
+          <Button variant="ghost" size="sm" onClick={() => setShowForm((v) => !v)}>
+            {showForm ? "Отмена" : "+ Новый"}
+          </Button>
+        }
+      />
 
-      {error && (
-        <p className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+      {displayError && (
+        <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {displayError}
         </p>
       )}
 
-      <Card className="mb-6 rounded-3xl">
-        <CardContent>
-          <h2 className="mb-4 text-lg font-semibold">Новый счёт</h2>
-          <form onSubmit={create} className="grid gap-4 md:grid-cols-2">
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-neutral-500">Название</span>
-              <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} required />
-            </label>
-            <label className="block">
-              <span className="mb-1.5 block text-sm text-neutral-500">Начальный баланс (₽)</span>
-              <input
-                className="input-field"
-                type="number"
-                step="0.01"
-                value={balanceRub}
-                onChange={(e) => setBalanceRub(e.target.value)}
-              />
-            </label>
-            <div className="md:col-span-2">
-              <Button type="submit" disabled={loading}>
+      {accountsLoading && accounts.length === 0 ? (
+        <p className="py-12 text-center text-sm text-neutral-400">Загрузка...</p>
+      ) : (
+        <>
+          {showForm && (
+            <form onSubmit={create} className="mb-4 space-y-3 rounded-xl border border-neutral-100 p-3">
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-500">Название</span>
+                <input className="input-field" value={name} onChange={(e) => setName(e.target.value)} required />
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs text-neutral-500">Начальный баланс (₽)</span>
+                <input
+                  className="input-field"
+                  type="number"
+                  step="0.01"
+                  value={balanceRub}
+                  onChange={(e) => setBalanceRub(e.target.value)}
+                />
+              </label>
+              <Button type="submit" variant="brand" disabled={saving} className="w-full">
                 Создать
               </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+            </form>
+          )}
 
-      <div className="grid gap-4 md:grid-cols-2">
-        {accounts.map((a) => (
-          <Card key={a.id} className="rounded-3xl">
-            <CardContent className="flex items-start justify-between">
-              <div>
-                <div className="font-medium">{a.name}</div>
-                <div className="mt-2 text-2xl font-semibold">{formatMoney(a.balance)}</div>
+          <div className="list-divider overflow-hidden rounded-xl border border-neutral-100">
+            {accounts.map((a) => (
+              <div key={a.id} className="flex items-center justify-between px-3 py-3">
+                <div>
+                  <p className="text-sm font-medium">{a.name}</p>
+                  <p className="text-lg font-semibold tabular-nums">{formatMoney(a.balance)}</p>
+                </div>
+                <Button variant="ghost" size="sm" className="text-red-500" onClick={() => remove(a.id)}>
+                  Удалить
+                </Button>
               </div>
-              <Button variant="outline" size="sm" onClick={() => remove(a.id)}>
-                Удалить
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
+            ))}
+            {accounts.length === 0 && (
+              <p className="px-3 py-8 text-center text-sm text-neutral-400">Нет счетов</p>
+            )}
+          </div>
+        </>
+      )}
     </>
   );
 }

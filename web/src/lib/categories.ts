@@ -1,7 +1,14 @@
 import type { Category } from "@/api/client";
 
 export function getRootCategories(categories: Category[], type: string): Category[] {
-  return categories.filter((c) => c.type === type);
+  return categories
+    .filter((c) => c.type === type)
+    .sort((a, b) => {
+      const aCustom = a.is_custom ? 1 : 0;
+      const bCustom = b.is_custom ? 1 : 0;
+      if (aCustom !== bCustom) return aCustom - bCustom;
+      return a.name.localeCompare(b.name, "ru");
+    });
 }
 
 export function getSubcategories(categories: Category[], parentId: string): Category[] {

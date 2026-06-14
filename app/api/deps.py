@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import Depends, Header
 from sqlalchemy.orm import Session
 
+from app.core.dates import resolve_timezone
 from app.core.exceptions import UnauthorizedError
 from app.core.security import decode_access_token
 from app.database import get_db
@@ -11,6 +12,15 @@ from app.database.models import User
 from app.repositories.user_repository import UserRepository
 
 DbSession = Annotated[Session, Depends(get_db)]
+
+
+def get_request_timezone(
+    x_timezone: Annotated[str | None, Header(alias="X-Timezone")] = None,
+) -> str:
+    return resolve_timezone(x_timezone)
+
+
+RequestTimezone = Annotated[str, Depends(get_request_timezone)]
 
 
 def get_current_user(
@@ -36,3 +46,21 @@ def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+def get_user_timezone(
+    db: DbSession,
+    user: CurrentUser,
+    x_timezone: Annotated[str | None, Header(alias="X-Timezone")] = None,
+) -> str:
+    stored = resolve_timezone(user.timezone)
+    if x_timezone:
+        header_tz = resolve_timezone(x_timezone)
+        if header_tz != stored:
+            user.timezone = header_tz
+            db.commit()
+            return header_tz
+    return stored
+
+
+UserTimezone = Annotated[str, Depends(get_user_timezone)]

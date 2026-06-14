@@ -3,9 +3,52 @@
 @tailwind utilities;
 
 body {
-  @apply antialiased;
+  @apply bg-white text-neutral-900 antialiased;
 }
 
 .input-field {
-  @apply w-full rounded-2xl border border-neutral-200 bg-white px-4 py-2.5 text-sm outline-none transition focus:border-neutral-900;
+  @apply w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none transition focus:border-brand focus:bg-white;
+}
+
+@layer components {
+  .page-shell {
+    @apply mx-auto w-full max-w-lg px-4 pb-24 pt-3 md:max-w-4xl md:px-8 md:pb-8 md:pt-6;
+  }
+
+  .section-title {
+    @apply text-xs font-semibold uppercase tracking-wide text-neutral-400;
+  }
+
+  .list-divider {
+    @apply divide-y divide-neutral-100;
+  }
+
+  .hairline-b {
+    @apply border-b border-neutral-100;
+  }
+
+  .fab-delay-1 {
+    animation-delay: 0.05s;
+  }
+
+  .fab-delay-2 {
+    animation-delay: 0.1s;
+  }
+
+  .tap-scale {
+    @apply transition-transform duration-150 active:scale-[0.97];
+  }
+
+  .stagger-in > * {
+    @apply animate-page-in;
+  }
+
+  .stagger-in > *:nth-child(1) { animation-delay: 0ms; }
+  .stagger-in > *:nth-child(2) { animation-delay: 40ms; }
+  .stagger-in > *:nth-child(3) { animation-delay: 80ms; }
+  .stagger-in > *:nth-child(4) { animation-delay: 120ms; }
+  .stagger-in > *:nth-child(5) { animation-delay: 160ms; }
+  .stagger-in > *:nth-child(6) { animation-delay: 200ms; }
+  .stagger-in > *:nth-child(7) { animation-delay: 240ms; }
+  .stagger-in > *:nth-child(8) { animation-delay: 280ms; }
 }

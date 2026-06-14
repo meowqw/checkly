@@ -31,12 +31,14 @@ class ProductRepository:
         return self._db.scalar(stmt)
 
     def find_alias_by_normalized_name(self, normalized_name: str) -> ProductAlias | None:
-        return self._db.scalar(
+        stmt = (
             select(ProductAlias)
             .options(joinedload(ProductAlias.product).joinedload(Product.category))
             .where(ProductAlias.normalized_name == normalized_name)
             .order_by(ProductAlias.confidence.desc().nullslast())
+            .limit(1)
         )
+        return self._db.scalar(stmt)
 
     def create_product(self, product: Product) -> Product:
         self._db.add(product)

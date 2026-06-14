@@ -34,6 +34,9 @@ class User(Base, TimestampMixin):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password: Mapped[str] = mapped_column(String(255), nullable=False)
     login: Mapped[str] = mapped_column(String(100), unique=True, nullable=False, index=True)
+    timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="Europe/Moscow", server_default="Europe/Moscow"
+    )
 
     accounts: Mapped[list["Account"]] = relationship(
         "Account", secondary="user_accounts", back_populates="users"
@@ -203,6 +206,28 @@ class TransactionItem(Base, TimestampMixin):
     transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="items")
     product: Mapped["Product | None"] = relationship("Product", back_populates="transaction_items")
     category: Mapped["Category | None"] = relationship("Category")
+
+
+class UserProductCategoryOverride(Base, TimestampMixin):
+    """Персональная категория товара для пользователя (не меняет глобальный Product)."""
+
+    __tablename__ = "user_product_category_overrides"
+    __table_args__ = (UniqueConstraint("user_id", "product_id", name="uq_user_product_override"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    product_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    category_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("categories.id", ondelete="CASCADE"), nullable=False
+    )
+
+    user: Mapped["User"] = relationship("User")
+    product: Mapped["Product"] = relationship("Product")
+    category: Mapped["Category"] = relationship("Category")
 
 
 class Receipt(Base, TimestampMixin):

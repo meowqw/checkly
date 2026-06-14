@@ -1,9 +1,11 @@
+import { getUserTimezone } from "@/lib/dates";
+
 const API_BASE = import.meta.env.VITE_API_URL ?? "";
 
 const TOKEN_KEY = "fm_token";
 const USER_KEY = "fm_user";
 
-export type User = { id: string; email: string; login: string };
+export type User = { id: string; email: string; login: string; timezone: string };
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -11,7 +13,13 @@ export function getToken(): string | null {
 
 export function getUser(): User | null {
   const raw = localStorage.getItem(USER_KEY);
-  return raw ? (JSON.parse(raw) as User) : null;
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as User;
+  } catch {
+    clearAuth();
+    return null;
+  }
 }
 
 export function setAuth(token: string, user: User) {
@@ -22,6 +30,13 @@ export function setAuth(token: string, user: User) {
 export function clearAuth() {
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(USER_KEY);
+}
+
+type UnauthorizedHandler = () => void;
+let onUnauthorized: UnauthorizedHandler | null = null;
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
+  onUnauthorized = handler;
 }
 
 export class ApiError extends Error {
@@ -40,6 +55,7 @@ async function request<T>(
 ): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
+    "X-Timezone": getUserTimezone(),
     ...(options.headers as Record<string, string>),
   };
   if (auth) {
@@ -47,11 +63,36 @@ async function request<T>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (!API_BASE && import.meta.env.PROD) {
+    throw new ApiError(
+      "API не настроен. Пересоберите APK с VITE_API_URL в .env.production.local",
+      0
+    );
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  } catch {
+    throw new ApiError(
+      `Нет связи с сервером${API_BASE ? ` (${API_BASE})` : ""}. Проверьте интернет и что API запущен.`,
+      0
+    );
+  }
+
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new ApiError(data.error ?? data.detail ?? "Ошибка запроса", res.status);
+    if (res.status === 401 && auth) {
+      clearAuth();
+      onUnauthorized?.();
+    }
+    const detail = data.detail;
+    const message =
+      data.error ??
+      (typeof detail === "string" ? detail : Array.isArray(detail) ? detail[0]?.msg : null) ??
+      "Ошибка запроса";
+    throw new ApiError(String(message), res.status);
   }
   return data as T;
 }
@@ -88,6 +129,21 @@ export const api = {
       `/v1/categories?include=${includeChildren ? "children" : ""}`
     ),
 
+  createCategory: (body: CreateCategoryBody) =>
+    request<{ category: Category }>("/v1/categories", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+
+  updateCategory: (id: string, body: UpdateCategoryBody) =>
+    request<{ category: Category }>(`/v1/categories/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }),
+
+  deleteCategory: (id: string) =>
+    request<{ success: boolean }>(`/v1/categories/${id}`, { method: "DELETE" }),
+
   transactions: (params?: Record<string, string>) => {
     const q = params ? "?" + new URLSearchParams(params).toString() : "";
     return request<{ transactions: Transaction[] }>(`/v1/transactions${q}`);
@@ -101,6 +157,16 @@ export const api = {
     ),
   deleteTransaction: (id: string) =>
     request<{ success: boolean }>(`/v1/transactions/${id}`, { method: "DELETE" }),
+
+  updateTransactionItem: (
+    transactionId: string,
+    itemId: string,
+    body: { category_id: string }
+  ) =>
+    request<{ transaction: TransactionDetail }>(
+      `/v1/transactions/${transactionId}/items/${itemId}`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    ),
 
   scanQr: (body: { account_id: string; qr: string }) =>
     request<{ transaction: TransactionDetail }>("/v1/receipts/qr", {
@@ -116,7 +182,24 @@ export type Category = {
   name: string;
   type: string;
   parent_id?: string | null;
+  icon?: string | null;
+  color?: string | null;
+  is_custom?: boolean;
   children?: Category[];
+};
+
+export type CreateCategoryBody = {
+  name: string;
+  type: "expense" | "income";
+  parent_id?: string;
+  icon?: string;
+  color?: string;
+};
+
+export type UpdateCategoryBody = {
+  name?: string;
+  icon?: string;
+  color?: string;
 };
 
 export type Transaction = {

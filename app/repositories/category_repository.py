@@ -25,8 +25,10 @@ class CategoryRepository:
         )
 
     def list_for_user(self, user_id: int) -> list[Category]:
-        stmt = select(Category).where(
-            or_(Category.user_id.is_(None), Category.user_id == user_id)
+        stmt = (
+            select(Category)
+            .where(or_(Category.user_id.is_(None), Category.user_id == user_id))
+            .order_by(Category.parent_id.is_(None).desc(), Category.name)
         )
         return list(self._db.scalars(stmt).all())
 

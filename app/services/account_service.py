@@ -1,4 +1,6 @@
 """Сервис счетов."""
+import logging
+
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
@@ -13,6 +15,8 @@ from app.dto.accounts import (
     UpdateAccountRequestDTO,
 )
 from app.repositories.account_repository import AccountRepository
+
+logger = logging.getLogger(__name__)
 
 
 class AccountService:
@@ -40,6 +44,10 @@ class AccountService:
         if dto.name is not None:
             account.name = dto.name
         if dto.balance is not None:
+            logger.warning(
+                "Прямое изменение balance счёта %s — лучше корректировать через транзакции",
+                account.uid,
+            )
             account.balance = dto.balance
         self._db.commit()
         self._db.refresh(account)

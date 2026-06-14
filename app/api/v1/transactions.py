@@ -3,7 +3,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Query
 
-from app.api.deps import CurrentUser, DbSession
+from app.api.deps import CurrentUser, DbSession, UserTimezone
 from app.core.enums import TransactionType
 from app.dto.accounts import SuccessResponseDTO
 from app.dto.transactions import (
@@ -13,6 +13,8 @@ from app.dto.transactions import (
     TransactionResponseDTO,
     TransactionsListResponseDTO,
     UpdateTransactionDTO,
+    UpdateTransactionItemDTO,
+    UpdateTransactionItemRequestDTO,
     UpdateTransactionRequestDTO,
 )
 from app.services.transaction_service import TransactionService
@@ -24,6 +26,7 @@ router = APIRouter(prefix="/transactions", tags=["transactions"])
 def list_transactions(
     db: DbSession,
     user: CurrentUser,
+    tz: UserTimezone,
     from_date: datetime | None = Query(default=None, alias="from"),
     to_date: datetime | None = Query(default=None, alias="to"),
     type: TransactionType | None = None,
@@ -35,13 +38,14 @@ def list_transactions(
         to_date=to_date,
         type=type,
         account_uid=account_id,
+        timezone=tz,
     )
     return TransactionService(db).list_transactions(filters)
 
 
 @router.post("", response_model=TransactionResponseDTO)
 def create_transaction(
-    dto: CreateManualTransactionRequestDTO, db: DbSession, user: CurrentUser
+    dto: CreateManualTransactionRequestDTO, db: DbSession, user: CurrentUser, tz: UserTimezone
 ) -> TransactionResponseDTO:
     service_dto = CreateManualTransactionDTO(
         user_id=user.id,
@@ -52,6 +56,7 @@ def create_transaction(
         occurred_at=dto.occurred_at,
         category_uid=dto.category_id,
         comment=dto.comment,
+        timezone=tz,
     )
     return TransactionService(db).create_manual_transaction(service_dto)
 
@@ -78,6 +83,23 @@ def update_transaction(
         comment=dto.comment,
     )
     return TransactionService(db).update_transaction(service_dto)
+
+
+@router.patch("/{transaction_id}/items/{item_id}", response_model=TransactionResponseDTO)
+def update_transaction_item(
+    transaction_id: str,
+    item_id: str,
+    dto: UpdateTransactionItemRequestDTO,
+    db: DbSession,
+    user: CurrentUser,
+) -> TransactionResponseDTO:
+    service_dto = UpdateTransactionItemDTO(
+        user_id=user.id,
+        transaction_uid=transaction_id,
+        item_uid=item_id,
+        category_uid=dto.category_id,
+    )
+    return TransactionService(db).update_transaction_item(service_dto)
 
 
 @router.delete("/{transaction_id}", response_model=SuccessResponseDTO)

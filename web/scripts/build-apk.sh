@@ -22,14 +22,32 @@ export PATH="$JAVA_HOME/bin:$PATH"
 echo "Using JAVA_HOME=$JAVA_HOME"
 java -version
 
+if [[ ! -f "$ROOT/.env.production.local" ]]; then
+  echo "Создайте $ROOT/.env.production.local с VITE_API_URL (см. .env.android.example)"
+  exit 1
+fi
+
+echo "API URL для сборки: $(grep -v '^#' "$ROOT/.env.production.local" | grep VITE_API_URL || true)"
+
+bash "$ROOT/scripts/apply-android-icon.sh" 2>/dev/null || true
+
 npm run cap:sync
 cd android
-./gradlew assembleDebug
+
+# Повреждённый кэш Gradle (bcprov-jdk18on) — частая причина Failed to create Jar file
+if [[ -d "$HOME/.gradle/caches/jars-9" ]]; then
+  find "$HOME/.gradle/caches/jars-9" -name "bcprov-jdk18on*.jar*" -delete 2>/dev/null || true
+fi
+
+./gradlew assembleDebug --no-daemon
 
 APK="app/build/outputs/apk/debug/app-debug.apk"
+OUT="$ROOT/android/app/build/outputs/apk/debug/checkly-alfa.apk"
 if [[ -f "$APK" ]]; then
+  cp "$APK" "$OUT"
   echo ""
-  echo "✅ APK: $ROOT/android/$APK"
+  echo "✅ APK: $OUT"
+  echo "   API: $(grep VITE_API_URL "$ROOT/.env.production.local" 2>/dev/null || echo 'задайте VITE_API_URL в .env.production.local')"
 else
   echo "Сборка завершилась, но APK не найден по пути $APK"
   exit 1

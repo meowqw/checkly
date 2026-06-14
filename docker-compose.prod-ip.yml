@@ -1,0 +1,6 @@
+# Дополнение для доступа по IP без Nginx/домена:
+# docker compose -f docker-compose.prod.yml -f docker-compose.prod-ip.yml up -d --build
+services:
+  app:
+    ports:
+      - "8000:8000"

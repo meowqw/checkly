@@ -1,94 +1,184 @@
-import { useEffect, useMemo, useState } from "react";
-import { api, type Category } from "@/api/client";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import * as data from "@/api/data-service";
+import { ApiError, type Category } from "@/api/client";
+import { CategoryIcon } from "@/components/CategoryIcon";
+import { CreateCategorySheet } from "@/components/CreateCategorySheet";
+import { PageHeader } from "@/components/mobile/PageHeader";
+import { cn } from "@/lib/utils";
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [filter, setFilter] = useState<"expense" | "income">("expense");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  useEffect(() => {
-    api
-      .categories()
+  const load = useCallback(() => {
+    setLoading(true);
+    setError("");
+    data
+      .getCategories()
       .then((r) => setCategories(r.categories))
+      .catch((err) => {
+        setError(err instanceof ApiError ? err.message : "Не удалось загрузить категории");
+      })
       .finally(() => setLoading(false));
   }, []);
 
-  const roots = useMemo(
-    () => categories.filter((c) => c.type === filter),
-    [categories, filter]
-  );
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const roots = useMemo(() => {
+    return categories
+      .filter((c) => c.type === filter)
+      .sort((a, b) => {
+        const aCustom = a.is_custom ? 1 : 0;
+        const bCustom = b.is_custom ? 1 : 0;
+        if (aCustom !== bCustom) return aCustom - bCustom;
+        return a.name.localeCompare(b.name, "ru");
+      });
+  }, [categories, filter]);
+
+  const removeCategory = async (cat: Category) => {
+    if (!cat.is_custom) return;
+    if (!confirm(`Удалить категорию «${cat.name}»?`)) return;
+    setDeletingId(cat.id);
+    try {
+      await data.deleteCategory(cat.id);
+      load();
+    } catch (err) {
+      alert(err instanceof ApiError ? err.message : "Не удалось удалить");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   return (
     <>
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Категории</h1>
-        <p className="mt-1 text-neutral-500">Категории и подкатегории отдельно</p>
-      </header>
+      <PageHeader
+        title="Категории"
+        subtitle="Системные и свои"
+        action={
+          <button
+            type="button"
+            onClick={() => setCreateOpen(true)}
+            className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand text-white shadow-sm"
+            aria-label="Добавить категорию"
+          >
+            <Plus size={18} />
+          </button>
+        }
+      />
 
-      <div className="mb-4 inline-flex rounded-2xl border border-neutral-200 bg-white p-1">
-        <FilterBtn active={filter === "expense"} onClick={() => setFilter("expense")}>
-          Расходы
-        </FilterBtn>
-        <FilterBtn active={filter === "income"} onClick={() => setFilter("income")}>
-          Доходы
-        </FilterBtn>
+      <div className="mb-4 flex border-b border-neutral-100">
+        {(["expense", "income"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setFilter(t)}
+            className={cn(
+              "relative flex-1 py-2 text-sm font-medium",
+              filter === t ? "text-brand" : "text-neutral-400"
+            )}
+          >
+            {t === "expense" ? "Расходы" : "Доходы"}
+            {filter === t && (
+              <span className="absolute inset-x-4 -bottom-px h-0.5 rounded-full bg-brand" />
+            )}
+          </button>
+        ))}
       </div>
 
       {loading ? (
-        <p className="text-neutral-500">Загрузка...</p>
+        <p className="py-12 text-center text-sm text-neutral-400">Загрузка...</p>
+      ) : error ? (
+        <p className="py-12 text-center text-sm text-red-600">{error}</p>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-3 pb-4">
           {roots.map((cat) => (
-            <Card key={cat.id} className="rounded-3xl">
-              <CardContent>
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">{cat.name}</span>
-                  <Badge>категория</Badge>
-                </div>
-                {cat.children && cat.children.length > 0 ? (
-                  <ul className="mt-4 space-y-2 border-t border-neutral-100 pt-4">
-                    {cat.children.map((ch) => (
-                      <li
-                        key={ch.id}
-                        className="flex items-center justify-between rounded-xl bg-neutral-50 px-3 py-2 text-sm"
-                      >
-                        <span className="text-neutral-700">{ch.name}</span>
-                        <span className="text-xs text-neutral-400">подкатегория</span>
-                      </li>
-                    ))}
-                  </ul>
-                ) : (
-                  <p className="mt-3 text-xs text-neutral-400">Нет подкатегорий</p>
-                )}
-              </CardContent>
-            </Card>
+            <CategoryCard
+              key={cat.id}
+              category={cat}
+              deleting={deletingId === cat.id}
+              onDelete={() => void removeCategory(cat)}
+            />
           ))}
         </div>
       )}
+
+      <CreateCategorySheet
+        open={createOpen}
+        type={filter}
+        categories={categories}
+        onClose={() => setCreateOpen(false)}
+        onCreated={load}
+      />
     </>
   );
 }
 
-function FilterBtn({
-  active,
-  onClick,
-  children,
+function CategoryCard({
+  category,
+  deleting,
+  onDelete,
 }: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
+  category: Category;
+  deleting: boolean;
+  onDelete: () => void;
 }) {
+  const children = category.children ?? [];
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-xl px-4 py-2 text-sm transition ${
-        active ? "bg-neutral-900 text-white" : "text-neutral-500 hover:text-neutral-900"
-      }`}
-    >
-      {children}
-    </button>
+    <div className="overflow-hidden rounded-xl border border-neutral-100">
+      <div className="flex items-center gap-3 bg-neutral-50 px-3 py-2.5">
+        <CategoryIcon icon={category.icon} color={category.color} name={category.name} size="sm" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="truncate text-sm font-semibold">{category.name}</span>
+            {category.is_custom && (
+              <span className="shrink-0 rounded-full bg-brand-muted px-2 py-0.5 text-[10px] font-medium text-brand-dark">
+                Моя
+              </span>
+            )}
+          </div>
+          {!category.is_custom && (
+            <p className="text-[11px] text-neutral-400">Системная · для чеков</p>
+          )}
+        </div>
+        {category.is_custom && (
+          <button
+            type="button"
+            onClick={onDelete}
+            disabled={deleting}
+            className="rounded-lg p-2 text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+            aria-label="Удалить категорию"
+          >
+            <Trash2 size={16} />
+          </button>
+        )}
+      </div>
+
+      {children.length > 0 ? (
+        <ul className="list-divider">
+          {children.map((ch) => (
+            <li key={ch.id} className="flex items-center gap-2.5 px-3 py-2.5">
+              <span
+                className="h-1.5 w-1.5 shrink-0 rounded-full"
+                style={{ backgroundColor: category.color ?? "#d4d4d4" }}
+              />
+              <span className="min-w-0 flex-1 truncate text-sm text-neutral-600">{ch.name}</span>
+              {ch.is_custom && (
+                <span className="shrink-0 text-[10px] text-neutral-400">моя</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-3 py-2 text-xs text-neutral-400">Без подкатегорий</p>
+      )}
+    </div>
   );
 }

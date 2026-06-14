@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any
 
-from app.core.category_taxonomy import build_taxonomy_prompt_block, resolve_subcategory
+from app.core.category_taxonomy import build_taxonomy_prompt_block, normalize_expense_category, resolve_subcategory
 from app.core.exceptions import ExternalServiceError
 from app.dto.receipts import (
     NormalizedItemDTO,
@@ -31,6 +31,9 @@ SYSTEM_PROMPT = f"""Ты помощник для нормализации поз
 - category и subcategory должны строго совпадать с деревом выше (регистр и формулировка).
 - Если у категории есть подкатегории — subcategory не может быть null.
 - Для «Подарки» и «Прочее» subcategory = null.
+- Продукты → Алкоголь: пиво, вино, водка, шампанское и любой алкоголь.
+- Продукты → Напитки: только безалкогольное (вода, сок, газировка, чай, кофе, энергетики).
+- Продукты → Крупы: рис, гречка, овсянка, перловка, макароны, мука, бобовые в сухом виде.
 - Суммы не меняй. Отвечай только валидным JSON."""
 
 
@@ -62,7 +65,7 @@ def map_to_output(raw_items: list[dict[str, Any]]) -> ProductNormalizerOutputDTO
         if not isinstance(entry, dict):
             continue
         raw_name = entry.get("raw_name", "")
-        category = entry.get("category") or "Прочее"
+        category = normalize_expense_category(entry.get("category"))
         subcategory = resolve_subcategory(
             category,
             entry.get("subcategory"),
