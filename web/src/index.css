@@ -2,8 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
+html,
+body,
+#root {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
 body {
   @apply bg-white text-neutral-900 antialiased;
+  /* Capacitor WebView: не даём странице «разъезжаться» по горизонтали */
+  overscroll-behavior-x: none;
+}
+
+input,
+select,
+textarea,
+button {
+  max-width: 100%;
+}
+
+input[type="datetime-local"] {
+  min-width: 0;
 }
 
 .input-field {
@@ -12,7 +33,7 @@ body {
 
 @layer components {
   .page-shell {
-    @apply mx-auto w-full max-w-lg px-4 pb-24 pt-3 md:max-w-4xl md:px-8 md:pb-8 md:pt-6;
+    @apply mx-auto w-full max-w-full min-w-0 overflow-x-hidden px-4 pb-24 pt-3 md:max-w-4xl md:px-8 md:pb-8 md:pt-6;
   }
 
   .section-title {

@@ -57,9 +57,25 @@ export async function invalidateAllTransactionsCache(): Promise<void> {
   const keys = await db.getAllKeys("cache");
   await Promise.all(
     keys
-      .filter((key): key is string => typeof key === "string" && key.startsWith("transactions:"))
+      .filter(
+        (key): key is string =>
+          typeof key === "string" &&
+          (key.startsWith("transactions:") || key.startsWith("stats:"))
+      )
       .map((key) => db.delete("cache", key))
   );
+}
+
+export function statsCacheKey(params?: Record<string, string>): string {
+  return `stats:${JSON.stringify(params ?? {})}`;
+}
+
+export async function cacheStats(params: Record<string, string> | undefined, stats: import("@/api/client").PeriodStats) {
+  await setCache(statsCacheKey(params), stats);
+}
+
+export async function readStatsCache(params?: Record<string, string>): Promise<import("@/api/client").PeriodStats | null> {
+  return getCache<import("@/api/client").PeriodStats>(statsCacheKey(params));
 }
 
 export async function putLocalTransaction(tx: LocalTransaction) {

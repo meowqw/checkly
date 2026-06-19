@@ -12,6 +12,7 @@ import {
   Music,
   Package,
   Palette,
+  PawPrint,
   Plane,
   Shirt,
   ShoppingCart,
@@ -44,6 +45,7 @@ export const CATEGORY_ICON_MAP: Record<string, LucideIcon> = {
   plane: Plane,
   music: Music,
   palette: Palette,
+  "paw-print": PawPrint,
   tag: Tag,
 };
 
@@ -58,6 +60,7 @@ export const CATEGORY_NAME_ICON: Record<string, string> = {
   Связь: "smartphone",
   Образование: "book-open",
   Подарки: "gift",
+  Животные: "paw-print",
   Прочее: "package",
   Зарплата: "wallet",
   Подработка: "briefcase",
@@ -75,6 +78,7 @@ export const CATEGORY_NAME_COLOR: Record<string, string> = {
   Связь: "#06b6d4",
   Образование: "#6366f1",
   Подарки: "#f97316",
+  Животные: "#84cc16",
   Прочее: "#78716c",
   Зарплата: "#16a34a",
   Подработка: "#0891b2",

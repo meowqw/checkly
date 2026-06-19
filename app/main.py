@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.v1.router import api_router
 from app.config import get_settings
 from app.core.exceptions import AppError
+from app.openapi import API_DESCRIPTION, OPENAPI_TAGS
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +60,10 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Finance Manager API",
+        description=API_DESCRIPTION,
         version="1.0.0",
         debug=settings.app_debug,
+        openapi_tags=OPENAPI_TAGS,
     )
 
     app.add_middleware(
@@ -86,7 +89,11 @@ def create_app() -> FastAPI:
         message = str(exc) if settings.app_debug else "Внутренняя ошибка сервера"
         return JSONResponse(status_code=500, content={"error": message})
 
-    @app.get("/health")
+    @app.get(
+        "/health",
+        summary="Проверка доступности",
+        description="Служебный эндпоинт для health-check. Не требует авторизации.",
+    )
     def health() -> dict[str, str]:
         return {"status": "ok"}
 

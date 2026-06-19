@@ -19,7 +19,9 @@ type Props = {
   type?: "expense" | "income" | string;
   occurredAt?: string;
   category?: string;
+  /** @deprecated используйте dotColor */
   colorIndex?: number;
+  dotColor?: string | null;
   onClick?: () => void;
   trailing?: React.ReactNode;
 };
@@ -32,16 +34,24 @@ export function TxRow({
   occurredAt,
   category,
   colorIndex = 0,
+  dotColor,
   onClick,
   trailing,
 }: Props) {
   const isExpense = type === "expense";
   const meta = subtitle ?? (occurredAt ? formatTxDate(occurredAt) : category);
+  const isReceiptDot = dotColor === null;
+  const dotStyle = dotColor && !isReceiptDot ? { backgroundColor: dotColor } : undefined;
 
   const inner = (
     <>
       <span
-        className={cn("mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full", DOT_COLORS[colorIndex % DOT_COLORS.length])}
+        className={cn(
+          "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
+          isReceiptDot && "border border-neutral-900 bg-white",
+          !isReceiptDot && !dotColor && DOT_COLORS[colorIndex % DOT_COLORS.length]
+        )}
+        style={dotStyle}
       />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{title}</p>

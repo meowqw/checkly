@@ -3,6 +3,7 @@ import {
   type Account,
   type Category,
   type CreateTransactionBody,
+  type PeriodStats,
   type TransactionDetail,
 } from "@/api/client";
 import { ApiError } from "@/api/client";
@@ -10,6 +11,7 @@ import { isOnline } from "@/lib/connectivity";
 import {
   cacheAccounts,
   cacheCategories,
+  cacheStats,
   cacheTransactions,
   hideEntity,
   invalidateAllTransactionsCache,
@@ -20,17 +22,48 @@ import {
   putLocalTransaction,
   readAccountsCache,
   readCategoriesCache,
+  readStatsCache,
   readTransactionsCache,
   removeLocalTransaction,
+  transactionsCacheKey,
+  statsCacheKey,
 } from "@/lib/offline/cache";
+import { buildStatsFromTransactions } from "@/lib/stats";
 import { enqueue, newOpId } from "@/lib/offline/queue";
 import { processSyncQueue, warmCacheIfOnline } from "@/lib/offline/sync";
 import type { LocalTransaction } from "@/lib/offline/types";
-import { notifyAccountsChanged, notifyTransactionsChanged } from "@/lib/data-events";
+import { notifyAccountsChanged, notifyCategoriesChanged, notifyTransactionsChanged } from "@/lib/data-events";
+
+export type CacheLoadOptions = {
+  /** Не запускать фоновую проверку с бэкендом (после notify*Changed). */
+  skipRevalidate?: boolean;
+};
 
 export { isOnline, processSyncQueue, warmCacheIfOnline };
 
-let accountsInflight: Promise<{ accounts: Account[]; fromCache: boolean }> | null = null;
+export type CacheFirstResult<T> = {
+  data: T;
+  fromCache: boolean;
+  /** Завершится после фоновой проверки актуальности с бэкендом. */
+  fresh?: Promise<void>;
+};
+
+let accountsInflight: Promise<{ accounts: Account[]; fromCache: boolean; fresh?: Promise<void> }> | null =
+  null;
+let accountsRevalidateInflight: Promise<void> | null = null;
+const transactionsInflight = new Map<
+  string,
+  Promise<{ transactions: Awaited<ReturnType<typeof mergeTransactions>>; fromCache: boolean; fresh?: Promise<void> }>
+>();
+const transactionsRevalidateInflight = new Map<string, Promise<void>>();
+let categoriesInflight: Promise<{ categories: Category[]; fromCache: boolean; fresh?: Promise<void> }> | null =
+  null;
+let categoriesRevalidateInflight: Promise<void> | null = null;
+const statsInflight = new Map<
+  string,
+  Promise<{ stats: PeriodStats; fromCache: boolean; fresh?: Promise<void> }>
+>();
+const statsRevalidateInflight = new Map<string, Promise<void>>();
 
 async function refreshAccountsCacheOnline() {
   if (!isOnline()) return;
@@ -44,29 +77,130 @@ async function invalidateTransactionsAfterMutation() {
   notifyTransactionsChanged();
 }
 
-export async function getAccounts(): Promise<{ accounts: Account[]; fromCache: boolean }> {
+async function revalidateAccounts(): Promise<void> {
+  if (!isOnline()) return;
+  if (accountsRevalidateInflight) return accountsRevalidateInflight;
+
+  accountsRevalidateInflight = (async () => {
+    try {
+      const res = await api.accounts();
+      await cacheAccounts(res.accounts);
+      notifyAccountsChanged();
+    } catch {
+      // оставляем кэш
+    } finally {
+      accountsRevalidateInflight = null;
+    }
+  })();
+
+  return accountsRevalidateInflight;
+}
+
+async function revalidateCategories(includeChildren = true): Promise<void> {
+  if (!isOnline()) return;
+  if (categoriesRevalidateInflight) return categoriesRevalidateInflight;
+
+  categoriesRevalidateInflight = (async () => {
+    try {
+      const res = await api.categories(includeChildren);
+      await cacheCategories(res.categories);
+      notifyCategoriesChanged();
+    } catch {
+      // оставляем кэш
+    } finally {
+      categoriesRevalidateInflight = null;
+    }
+  })();
+
+  return categoriesRevalidateInflight;
+}
+
+async function revalidateStats(params?: Record<string, string>): Promise<void> {
+  if (!isOnline()) return;
+  const key = statsCacheKey(params);
+  if (statsRevalidateInflight.has(key)) {
+    return statsRevalidateInflight.get(key)!;
+  }
+
+  const task = (async () => {
+    try {
+      const res = await api.stats(params);
+      await cacheStats(params, res);
+      notifyTransactionsChanged();
+    } catch {
+      // оставляем кэш
+    } finally {
+      statsRevalidateInflight.delete(key);
+    }
+  })();
+
+  statsRevalidateInflight.set(key, task);
+  return task;
+}
+
+async function buildStatsFallback(params?: Record<string, string>): Promise<PeriodStats> {
+  const cachedTx = await readTransactionsCache(params);
+  const cachedCats = await readCategoriesCache();
+  if (cachedTx && cachedCats) {
+    return buildStatsFromTransactions(
+      await mergeTransactions(cachedTx, params),
+      cachedCats
+    );
+  }
+  const [txRes, catRes] = await Promise.all([
+    getTransactions(params, { skipRevalidate: true }),
+    getCategories(true, { skipRevalidate: true }),
+  ]);
+  return buildStatsFromTransactions(txRes.transactions, catRes.categories);
+}
+
+async function revalidateTransactions(params?: Record<string, string>): Promise<void> {
+  if (!isOnline()) return;
+  const key = transactionsCacheKey(params);
+  if (transactionsRevalidateInflight.has(key)) {
+    return transactionsRevalidateInflight.get(key)!;
+  }
+
+  const task = (async () => {
+    try {
+      const res = await api.transactions(params);
+      await cacheTransactions(params, res.transactions);
+      notifyTransactionsChanged();
+    } catch {
+      // оставляем кэш
+    } finally {
+      transactionsRevalidateInflight.delete(key);
+    }
+  })();
+
+  transactionsRevalidateInflight.set(key, task);
+  return task;
+}
+
+export async function getAccounts(opts?: CacheLoadOptions): Promise<{
+  accounts: Account[];
+  fromCache: boolean;
+  fresh?: Promise<void>;
+}> {
   if (accountsInflight) return accountsInflight;
 
   accountsInflight = (async () => {
-    if (isOnline()) {
-      try {
-        const res = await api.accounts();
-        await cacheAccounts(res.accounts);
-        const merged = await mergeAccounts(res.accounts);
-        return { accounts: merged, fromCache: false };
-      } catch (err) {
-        const cached = await readAccountsCache();
-        if (cached) {
-          return { accounts: await mergeAccounts(cached), fromCache: true };
-        }
-        throw err;
-      }
-    }
     const cached = await readAccountsCache();
-    if (!cached) {
+    if (cached) {
+      return {
+        accounts: await mergeAccounts(cached),
+        fromCache: true,
+        fresh: !opts?.skipRevalidate ? revalidateAccounts() : undefined,
+      };
+    }
+
+    if (!isOnline()) {
       throw new ApiError("Нет кэша счетов. Откройте приложение при интернете.", 0);
     }
-    return { accounts: await mergeAccounts(cached), fromCache: true };
+
+    const res = await api.accounts();
+    await cacheAccounts(res.accounts);
+    return { accounts: await mergeAccounts(res.accounts), fromCache: false };
   })().finally(() => {
     accountsInflight = null;
   });
@@ -111,23 +245,50 @@ export async function deleteAccount(id: string) {
   return { success: true };
 }
 
-export async function getCategories(includeChildren = true): Promise<{ categories: Category[]; fromCache: boolean }> {
-  if (isOnline()) {
-    try {
-      const res = await api.categories(includeChildren);
-      await cacheCategories(res.categories);
-      return { categories: res.categories, fromCache: false };
-    } catch (err) {
-      const cached = await readCategoriesCache();
-      if (cached) return { categories: cached, fromCache: true };
-      throw err;
+/** @deprecated используйте getCategories — уже cache-first */
+export async function peekCategories(): Promise<Category[] | null> {
+  return readCategoriesCache();
+}
+
+/** @deprecated используйте getTransactions — уже cache-first */
+export async function peekTransactions(params?: Record<string, string>) {
+  const cached = await readTransactionsCache(params);
+  if (!cached) return null;
+  return mergeTransactions(cached, params);
+}
+
+export async function getCategories(
+  includeChildren = true,
+  opts?: CacheLoadOptions
+): Promise<{
+  categories: Category[];
+  fromCache: boolean;
+  fresh?: Promise<void>;
+}> {
+  if (categoriesInflight) return categoriesInflight;
+
+  categoriesInflight = (async () => {
+    const cached = await readCategoriesCache();
+    if (cached) {
+      return {
+        categories: cached,
+        fromCache: true,
+        fresh: !opts?.skipRevalidate ? revalidateCategories(includeChildren) : undefined,
+      };
     }
-  }
-  const cached = await readCategoriesCache();
-  if (!cached) {
-    throw new ApiError("Нет кэша категорий. Откройте приложение при интернете.", 0);
-  }
-  return { categories: cached, fromCache: true };
+
+    if (!isOnline()) {
+      throw new ApiError("Нет кэша категорий. Откройте приложение при интернете.", 0);
+    }
+
+    const res = await api.categories(includeChildren);
+    await cacheCategories(res.categories);
+    return { categories: res.categories, fromCache: false };
+  })().finally(() => {
+    categoriesInflight = null;
+  });
+
+  return categoriesInflight;
 }
 
 async function refreshCategoriesCache() {
@@ -163,26 +324,75 @@ export async function deleteCategory(id: string) {
   return res;
 }
 
-export async function getTransactions(params?: Record<string, string>) {
-  if (isOnline()) {
-    try {
-      const res = await api.transactions(params);
-      await cacheTransactions(params, res.transactions);
-      const merged = await mergeTransactions(res.transactions, params);
-      return { transactions: merged, fromCache: false };
-    } catch (err) {
-      const cached = await readTransactionsCache(params);
-      if (cached) {
-        return { transactions: await mergeTransactions(cached, params), fromCache: true };
-      }
-      throw err;
+export async function getTransactions(params?: Record<string, string>, opts?: CacheLoadOptions) {
+  const key = transactionsCacheKey(params);
+  if (transactionsInflight.has(key)) return transactionsInflight.get(key)!;
+
+  const task = (async () => {
+    const cached = await readTransactionsCache(params);
+    if (cached) {
+      return {
+        transactions: await mergeTransactions(cached, params),
+        fromCache: true,
+        fresh: !opts?.skipRevalidate ? revalidateTransactions(params) : undefined,
+      };
     }
-  }
-  const cached = await readTransactionsCache(params);
-  if (!cached) {
-    throw new ApiError("Нет кэша операций за этот период. Откройте раздел при интернете.", 0);
-  }
-  return { transactions: await mergeTransactions(cached, params), fromCache: true };
+
+    if (!isOnline()) {
+      throw new ApiError("Нет кэша операций за этот период. Откройте раздел при интернете.", 0);
+    }
+
+    const res = await api.transactions(params);
+    await cacheTransactions(params, res.transactions);
+    return {
+      transactions: await mergeTransactions(res.transactions, params),
+      fromCache: false,
+    };
+  })().finally(() => {
+    transactionsInflight.delete(key);
+  });
+
+  transactionsInflight.set(key, task);
+  return task;
+}
+
+export async function getStats(params?: Record<string, string>, opts?: CacheLoadOptions) {
+  const key = statsCacheKey(params);
+  if (statsInflight.has(key)) return statsInflight.get(key)!;
+
+  const task = (async () => {
+    const cached = await readStatsCache(params);
+    if (cached) {
+      return {
+        stats: cached,
+        fromCache: true,
+        fresh: !opts?.skipRevalidate ? revalidateStats(params) : undefined,
+      };
+    }
+
+    if (!isOnline()) {
+      try {
+        return {
+          stats: await buildStatsFallback(params),
+          fromCache: true,
+        };
+      } catch {
+        throw new ApiError("Нет кэша статистики за этот период. Откройте главную при интернете.", 0);
+      }
+    }
+
+    const res = await api.stats(params);
+    await cacheStats(params, res);
+    return {
+      stats: res,
+      fromCache: false,
+    };
+  })().finally(() => {
+    statsInflight.delete(key);
+  });
+
+  statsInflight.set(key, task);
+  return task;
 }
 
 export async function getTransaction(id: string): Promise<{ transaction: TransactionDetail }> {

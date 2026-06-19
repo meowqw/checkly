@@ -2,6 +2,7 @@ type Listener = () => void;
 
 const accountsListeners = new Set<Listener>();
 const transactionsListeners = new Set<Listener>();
+const categoriesListeners = new Set<Listener>();
 
 export function subscribeAccountsChanged(listener: Listener): () => void {
   accountsListeners.add(listener);
@@ -19,4 +20,13 @@ export function subscribeTransactionsChanged(listener: Listener): () => void {
 
 export function notifyTransactionsChanged() {
   transactionsListeners.forEach((fn) => fn());
+}
+
+export function subscribeCategoriesChanged(listener: Listener): () => void {
+  categoriesListeners.add(listener);
+  return () => categoriesListeners.delete(listener);
+}
+
+export function notifyCategoriesChanged() {
+  categoriesListeners.forEach((fn) => fn());
 }

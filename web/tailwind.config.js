@@ -47,6 +47,10 @@ export default {
           "0%, 100%": { transform: "scale(1)" },
           "50%": { transform: "scale(1.04)" },
         },
+        shimmer: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(350%)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 0.2s ease-out forwards",
@@ -56,6 +60,7 @@ export default {
         "fab-rise": "fab-rise 0.35s cubic-bezier(0.22, 1, 0.36, 1) forwards",
         "scale-in": "scale-in 0.25s ease-out forwards",
         "pulse-soft": "pulse-soft 2s ease-in-out infinite",
+        shimmer: "shimmer 1.1s ease-in-out infinite",
       },
     },
   },

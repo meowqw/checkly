@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
 import * as data from "@/api/data-service";
 import { formatMoney, type TransactionItem } from "@/api/client";
@@ -7,11 +7,15 @@ import { useAccounts } from "@/context/AccountsContext";
 import { ItemCategorySheet } from "@/components/ItemCategorySheet";
 import { PageHeader } from "@/components/mobile/PageHeader";
 import { PeriodNavigator } from "@/components/mobile/PeriodNavigator";
+import { RefreshBar } from "@/components/mobile/RefreshBar";
+import { TxRowsOnlySkeleton } from "@/components/mobile/Skeleton";
 import { TxRow } from "@/components/mobile/TxRow";
 import { Button } from "@/components/ui/button";
+import { trackBackgroundFresh } from "@/lib/cache-first";
 import { getPeriodRange, toApiDateTimeRange, type Period } from "@/lib/dates";
 import { subscribeTransactionsChanged } from "@/lib/data-events";
 import { groupByDate, sourceLabel, type TransactionListItem } from "@/lib/transactions";
+import { buildCategoryColorMap, resolveTransactionDotColor } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 export default function TransactionsPage() {
@@ -19,11 +23,14 @@ export default function TransactionsPage() {
   const [period, setPeriod] = useState<Period>("month");
   const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
   const [transactions, setTransactions] = useState<TransactionListItem[]>([]);
+  const [categoryTree, setCategoryTree] = useState<Awaited<ReturnType<typeof data.getCategories>>["categories"]>([]);
   const [type, setType] = useState<"" | "expense" | "income">("");
   const [accountId, setAccountId] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
+  const [booting, setBooting] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const hasEverLoaded = useRef(false);
   const [editItem, setEditItem] = useState<{
     txId: string;
     item: TransactionItem;
@@ -32,32 +39,54 @@ export default function TransactionsPage() {
 
   const range = useMemo(() => getPeriodRange(period, periodAnchor), [period, periodAnchor.getTime()]);
 
-  const reload = useCallback(() => {
+  const queryParams = useMemo(() => {
     const params: Record<string, string> = toApiDateTimeRange(range.from, range.to);
     if (type) params.type = type;
     if (accountId) params.account_id = accountId;
-    setLoading(true);
-    setError("");
-    return data
-      .getTransactions(params)
-      .then((r) => setTransactions(r.transactions as TransactionListItem[]))
-      .catch((err) => {
-        setError(err instanceof ApiError ? err.message : "Не удалось загрузить операции");
-      })
-      .finally(() => setLoading(false));
+    return params;
   }, [range.from.getTime(), range.to.getTime(), type, accountId]);
+
+  const reload = useCallback(
+    (skipRevalidate = false) =>
+      (async () => {
+        if (!hasEverLoaded.current) setBooting(true);
+        setError("");
+
+        try {
+          const [txRes, catRes] = await Promise.all([
+            data.getTransactions(queryParams, { skipRevalidate }),
+            data.getCategories(true, { skipRevalidate }),
+          ]);
+          setTransactions(txRes.transactions as TransactionListItem[]);
+          setCategoryTree(catRes.categories);
+          hasEverLoaded.current = true;
+          setBooting(false);
+          if (!skipRevalidate) {
+            trackBackgroundFresh([txRes, catRes], setRefreshing);
+          }
+        } catch (err) {
+          if (!hasEverLoaded.current) {
+            setError(err instanceof ApiError ? err.message : "Не удалось загрузить операции");
+            setBooting(false);
+          }
+        }
+      })(),
+    [queryParams]
+  );
 
   useEffect(() => {
     let cancelled = false;
-    void reload();
+    void reload(false);
     const unsub = subscribeTransactionsChanged(() => {
-      if (!cancelled) void reload();
+      if (!cancelled) void reload(true);
     });
     return () => {
       cancelled = true;
       unsub();
     };
   }, [reload]);
+
+  const colorMap = useMemo(() => buildCategoryColorMap(categoryTree), [categoryTree]);
 
   const grouped = useMemo(() => groupByDate(transactions), [transactions]);
 
@@ -84,7 +113,7 @@ export default function TransactionsPage() {
     if (!confirm("Удалить операцию?")) return;
     try {
       await data.deleteTransaction(id);
-      reload();
+      void reload(true);
     } catch (err) {
       alert(err instanceof ApiError ? err.message : "Ошибка");
     }
@@ -99,20 +128,20 @@ export default function TransactionsPage() {
         }
       />
 
-      <div className="mb-4 flex items-baseline justify-between gap-3 rounded-xl bg-neutral-50 px-3 py-2.5">
-        <div>
+      <div className="mb-4 grid grid-cols-3 gap-1 rounded-xl bg-neutral-50 px-2 py-2.5 sm:gap-3 sm:px-3">
+        <div className="min-w-0">
           <p className="text-[11px] text-neutral-400">Расходы</p>
-          <p className="text-base font-semibold tabular-nums">{formatMoney(totals.expense)}</p>
+          <p className="truncate text-sm font-semibold tabular-nums sm:text-base">{formatMoney(totals.expense)}</p>
         </div>
-        <div className="text-center">
+        <div className="min-w-0 text-center">
           <p className="text-[11px] text-neutral-400">Баланс</p>
-          <p className="text-base font-semibold tabular-nums text-brand">
+          <p className="truncate text-sm font-semibold tabular-nums text-brand sm:text-base">
             {formatMoney(totals.income - totals.expense)}
           </p>
         </div>
-        <div className="text-right">
+        <div className="min-w-0 text-right">
           <p className="text-[11px] text-neutral-400">Доходы</p>
-          <p className="text-base font-semibold tabular-nums">{formatMoney(totals.income)}</p>
+          <p className="truncate text-sm font-semibold tabular-nums sm:text-base">{formatMoney(totals.income)}</p>
         </div>
       </div>
 
@@ -124,7 +153,8 @@ export default function TransactionsPage() {
         className="mb-1"
       />
 
-      <div className="mb-4 -mx-1 flex gap-1.5 overflow-x-auto px-1 pb-1 scrollbar-none">
+      <div className="mb-4 overflow-x-auto overscroll-x-contain scrollbar-none">
+        <div className="flex w-max min-w-full gap-1.5 pb-1">
         <FilterChip active={type === ""} onClick={() => setType("")}>
           Все
         </FilterChip>
@@ -147,11 +177,14 @@ export default function TransactionsPage() {
             ))}
           </>
         )}
+        </div>
       </div>
 
-      {loading ? (
-        <p className="py-16 text-center text-sm text-neutral-400">Загрузка...</p>
-      ) : error ? (
+      <RefreshBar active={refreshing} />
+
+      {booting && !hasEverLoaded.current ? (
+        <TxRowsOnlySkeleton />
+      ) : error && !hasEverLoaded.current ? (
         <p className="py-16 text-center text-sm text-red-600">{error}</p>
       ) : transactions.length === 0 ? (
         <p className="py-16 text-center text-sm text-neutral-400">Нет операций за период</p>
@@ -161,11 +194,11 @@ export default function TransactionsPage() {
             <section key={group.label}>
               <h2 className="mb-1 px-0.5 text-xs font-semibold text-neutral-400">{group.label}</h2>
               <div className="list-divider rounded-xl bg-neutral-50/50 px-2">
-                {group.items.map((tx, i) => (
+                {group.items.map((tx) => (
                   <TransactionRow
                     key={tx.id}
                     tx={tx}
-                    colorIndex={i}
+                    dotColor={resolveTransactionDotColor(tx, colorMap)}
                     expanded={expanded.has(tx.id)}
                     onToggle={() => toggleExpand(tx.id)}
                     onDelete={() => remove(tx.id)}
@@ -186,7 +219,7 @@ export default function TransactionsPage() {
         item={editItem?.item ?? null}
         txType={editItem?.txType}
         onClose={() => setEditItem(null)}
-        onSaved={() => void reload()}
+        onSaved={() => void reload(true)}
       />
     </>
   );
@@ -217,14 +250,14 @@ function FilterChip({
 
 function TransactionRow({
   tx,
-  colorIndex,
+  dotColor,
   expanded,
   onToggle,
   onDelete,
   onEditItem,
 }: {
   tx: TransactionListItem;
-  colorIndex: number;
+  dotColor?: string | null;
   expanded: boolean;
   onToggle: () => void;
   onDelete: () => void;
@@ -234,19 +267,21 @@ function TransactionRow({
   const txType = tx.type === "income" ? "income" : "expense";
   const editableItems = (tx.items ?? []).filter((i) => i.id);
   const canEditItems = editableItems.length > 0;
-  const subtitle = [sourceLabel(tx.source), tx.account?.name, tx.category].filter(Boolean).join(" · ");
+  const subtitleParts = [sourceLabel(tx.source), tx.account?.name];
+  if (tx.source !== "qr_receipt" && tx.category) subtitleParts.push(tx.category);
+  const subtitle = subtitleParts.filter(Boolean).join(" · ");
 
   return (
     <div className="hairline-b last:border-0">
-      <button type="button" onClick={onToggle} className="flex w-full items-start gap-1 text-left active:bg-neutral-100/80">
-        <div className="min-w-0 flex-1">
+      <button type="button" onClick={onToggle} className="flex w-full min-w-0 items-start gap-1 text-left active:bg-neutral-100/80">
+        <div className="min-w-0 flex-1 overflow-hidden">
           <TxRow
             title={tx.title}
             subtitle={subtitle}
             amount={tx.amount}
             type={tx.type}
             occurredAt={tx.occurred_at}
-            colorIndex={colorIndex}
+            dotColor={dotColor}
           />
         </div>
         <span className="mt-2 shrink-0 p-1 text-neutral-300">

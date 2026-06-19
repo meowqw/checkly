@@ -6,6 +6,7 @@ import { formatMoney, type TransactionDetail, type TransactionItem } from "@/api
 import { ApiError } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
 import { ItemCategorySheet } from "@/components/ItemCategorySheet";
+import { NoAccountsNotice } from "@/components/NoAccountsNotice";
 import { QrCameraScanner } from "@/components/QrCameraScanner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,7 +15,7 @@ import { isNativeApp, scanReceiptQrNative } from "@/lib/qr-scanner";
 
 export default function QrPage() {
   const { online } = useSync();
-  const { accounts } = useAccounts();
+  const { accounts, loading: accountsLoading } = useAccounts();
   const [accountId, setAccountId] = useState("");
   const [qr, setQr] = useState("");
   const [error, setError] = useState("");
@@ -82,7 +83,7 @@ export default function QrPage() {
   };
 
   return (
-    <div className="-mx-4 px-4 md:mx-0 md:px-0">
+    <>
       <Link
         to="/"
         className="mb-3 inline-flex items-center gap-1.5 text-sm text-neutral-500 active:text-neutral-900"
@@ -108,6 +109,9 @@ export default function QrPage() {
         </p>
       )}
 
+      {!accountsLoading && accounts.length === 0 ? (
+        <NoAccountsNotice />
+      ) : (
       <form onSubmit={submit} className="space-y-3">
         {accounts.length > 1 && (
           <label className="block">
@@ -160,6 +164,7 @@ export default function QrPage() {
           {loading ? "Обработка..." : "Загрузить"}
         </Button>
       </form>
+      )}
 
       {result && (
         <div className="mt-5 border-t border-neutral-100 pt-4">
@@ -206,6 +211,6 @@ export default function QrPage() {
         onClose={() => setCameraOpen(false)}
         onScan={onWebScan}
       />
-    </div>
+    </>
   );
 }

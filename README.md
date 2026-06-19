@@ -1,48 +1,87 @@
-# Finance Manager API
+# Checkly (Finance Manager)
 
-MVP backend для учёта расходов с поддержкой QR-чеков, ручных операций и автоматической нормализации товаров через AI.
+MVP личного учёта финансов с упором на **российские фискальные чеки**.
+
+**Backend:** FastAPI + MySQL  
+**Frontend:** React + Vite + Capacitor (веб и Android APK)  
+**Offline-first:** ручные операции и счета работают без сети, синхронизация при появлении сети
+
+Подробная документация для разработки:
+- [BACKEND.md](BACKEND.md) — API, домен, миграции, чеки, LLM
+- [web/FRONTEND.md](web/FRONTEND.md) — UI, offline, сборка APK
+- [deploy/DEPLOY.md](deploy/DEPLOY.md) — деплой на VPS
+
+---
 
 ## Возможности
 
 - Регистрация и авторизация (JWT)
-- Счета пользователя
-- Категории (системные + пользовательские)
-- Ручные доходы/расходы
-- Сканирование QR-чека (proverkacheka.com)
-- Нормализация неизвестных товаров (OpenAI GPT)
-- Кэширование товаров в `products` / `product_aliases`
+- Счета, баланс в копейках
+- Категории: системные (для чеков) + пользовательские (для ручного ввода)
+- Ручные доходы и расходы
+- Сканирование QR чека ([proverkacheka.com](https://proverkacheka.com))
+- AI-категоризация товаров: **Groq / xAI Grok / OpenAI GPT** (автовыбор в `auto`)
+- Кэш товаров в `products` / `product_aliases`, персональные overrides категорий
+- Дашборд: баланс, траты по категориям, последние операции
+- Android APK с нативным сканером QR (ML Kit)
 
-Все суммы хранятся в **копейках** (850 ₽ → `85000`).
+Все суммы в API и БД — **копейки** (`850 ₽` → `85000`).
 
-## Быстрый старт (Docker, локально)
+---
+
+## Быстрый старт (Docker)
 
 ```bash
 cp .env.example .env
-# Заполните PROVERKACHEKA_TOKEN и GROK_API_KEY (или OPENAI_API_KEY) в .env
+# Минимум для чеков: PROVERKACHEKA_TOKEN
+# Для AI-категорий: GROQ_API_KEY, GROK_API_KEY или OPENAI_API_KEY
 
 docker compose up --build
 ```
 
-## Деплой на Ubuntu (VPS)
+| Сервис | URL |
+|--------|-----|
+| API | http://localhost:8000 |
+| Swagger (RU) | http://localhost:8000/docs |
+| Health | http://localhost:8000/health |
 
-Пошаговая инструкция: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**
+При старте контейнера: `alembic upgrade head` → сидер категорий → uvicorn.
 
-Кратко:
+### Фронтенд (dev)
 
 ```bash
-# на сервере: Docker + git clone + .env
+cd web
+npm install
+npm run dev
+```
+
+http://localhost:5173 — Vite проксирует `/v1` на `:8000` ( `VITE_API_URL` можно оставить пустым).
+
+---
+
+## Деплой на VPS
+
+Пошагово: **[deploy/DEPLOY.md](deploy/DEPLOY.md)**
+
+```bash
+# на сервере
 docker compose -f docker-compose.prod.yml up -d --build
 ```
 
-Продакшен: без `--reload`, MySQL не торчит в интернет. **Без домена:** `docker compose -f docker-compose.prod.yml -f docker-compose.prod-ip.yml up -d --build` → `http://IP:8000`. С доменом — Nginx + HTTPS (см. deploy/DEPLOY.md).
+**Без домена** (только IP):
 
-API: http://localhost:8000  
-Документация: http://localhost:8000/docs  
-Health: http://localhost:8000/health
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.prod-ip.yml up -d --build
+# → http://IP:8000
+```
 
-При старте контейнера автоматически выполняются миграции и сидер категорий.
+В `.env` на сервере задайте `JWT_SECRET` и `CORS_ORIGINS` (IP, `capacitor://localhost` для APK).
 
-## Локальный запуск
+---
+
+## Локальный запуск без Docker
+
+### Backend
 
 ```bash
 python -m venv .venv
@@ -50,98 +89,141 @@ source .venv/bin/activate
 pip install -r requirements.txt
 
 cp .env.example .env
-# Поднимите MySQL и укажите DB_* в .env
+# Поднимите MySQL, укажите DB_* в .env
 
 alembic upgrade head
 python scripts/seed_categories.py
 uvicorn app.main:app --reload --port 8000
 ```
 
+### Frontend
+
+```bash
+cd web && npm install && npm run dev
+```
+
+### Android APK
+
+```bash
+cd web
+cp .env.android.example .env.production.local
+# VITE_API_URL=http://ВАШ_IP:8000
+
+npm run android:apk
+```
+
+---
+
 ## Переменные окружения
 
 | Переменная | Описание |
 |------------|----------|
-| `DB_HOST` | Хост MySQL |
-| `DB_PORT` | Порт MySQL |
-| `DB_NAME` | Имя базы |
-| `DB_USER` | Пользователь БД |
-| `DB_PASSWORD` | Пароль БД |
-| `JWT_SECRET` | Секрет для JWT |
-| `JWT_ALGORITHM` | Алгоритм JWT (по умолчанию HS256) |
-| `JWT_EXPIRE_MINUTES` | Время жизни токена в минутах |
-| `PROVERKACHEKA_TOKEN` | Токен proverkacheka.com |
-| `PRODUCT_NORMALIZER` | `auto`, `groq`, `grok` или `gpt` |
-| `GROQ_API_KEY` | Ключ Groq (`gsk_...`, console.groq.com) — приоритет в `auto` |
-| `GROQ_MODEL` | Модель Groq (по умолчанию `llama-3.3-70b-versatile`) |
-| `GROK_API_KEY` | Ключ xAI Grok (`xai-...`, console.x.ai), не путать с Groq |
-| `GROK_MODEL` | Модель xAI (по умолчанию `grok-3-mini`) |
-| `OPENAI_API_KEY` | Ключ OpenAI (если `PRODUCT_NORMALIZER=gpt`) |
-| `OPENAI_MODEL` | Модель GPT (по умолчанию gpt-4o-mini) |
-| `APP_DEBUG` | Режим отладки SQLAlchemy |
+| `DB_*` | Подключение к MySQL |
+| `JWT_SECRET` | Секрет JWT (**обязателен в prod**) |
+| `JWT_EXPIRE_MINUTES` | Время жизни токена (по умолчанию 7 дней) |
+| `PROVERKACHEKA_TOKEN` | Токен proverkacheka.com для QR-чеков |
+| `PRODUCT_NORMALIZER` | `auto`, `groq`, `grok` / `xai`, `gpt` / `openai` |
+| `GROQ_API_KEY` | Groq (`gsk_...`) — приоритет в `auto` |
+| `GROK_API_KEY` | xAI Grok (`xai-...`), не путать с Groq |
+| `OPENAI_API_KEY` | OpenAI при `PRODUCT_NORMALIZER=gpt` |
+| `APP_DEBUG` | SQL echo и подробные ошибки |
+| `CORS_ORIGINS` | Доп. origins через запятую (APK, LAN IP) |
 
-## API (основное)
+Полный список: `.env.example`
 
-| Метод | Путь | Auth |
-|-------|------|------|
-| POST | `/v1/auth/register` | нет |
-| POST | `/v1/auth/login` | нет |
-| GET/POST/PATCH/DELETE | `/v1/accounts` | да |
-| GET/POST/PATCH/DELETE | `/v1/categories` | да |
-| GET/POST/PATCH/DELETE | `/v1/transactions` | да |
-| POST | `/v1/receipts/qr` | да |
+---
 
-Заголовок авторизации: `Authorization: Bearer <token>`
+## API (кратко)
 
-## Архитектура
+Prefix: `/v1` · Auth: `Authorization: Bearer <token>` · Timezone: `X-Timezone: Europe/Moscow`
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/v1/auth/register`, `/login` | Регистрация / вход |
+| CRUD | `/v1/accounts` | Счета |
+| CRUD | `/v1/categories` | Категории (`?include=children`) |
+| CRUD | `/v1/transactions` | Операции, фильтры `from`/`to` |
+| GET | `/v1/stats` | Статистика за период (расходы/доходы, категории, recent) |
+| PATCH | `/v1/transactions/{id}/items/{item_id}` | Категория позиции чека |
+| POST | `/v1/receipts/qr` | Импорт чека по QR |
+
+Детали, схемы и примеры: **http://localhost:8000/docs** и [BACKEND.md](BACKEND.md).
+
+---
+
+## Структура репозитория
 
 ```
-app/
-  api/v1/          # HTTP-контроллеры (тонкий слой)
-  dto/             # Pydantic DTO между слоями
-  services/        # Бизнес-логика
-  repositories/    # Доступ к БД
-  interfaces/      # Контракты внешних сервисов
-  implementations/ # proverkacheka, GPT
-  database/models  # SQLAlchemy-сущности
+finance_manager/
+├── app/                    # FastAPI backend
+│   ├── api/v1/             # HTTP-роуты
+│   ├── services/           # бизнес-логика
+│   ├── repositories/       # SQL
+│   ├── dto/                # Pydantic-схемы
+│   ├── implementations/    # proverkacheka, LLM-нормализаторы
+│   └── core/               # enums, dates, category_taxonomy
+├── alembic/                # миграции БД
+├── scripts/
+│   ├── seed_categories.py  # системные категории (идемпотентно)
+│   └── clean_receipt_data.py
+├── web/                    # React + Capacitor клиент
+├── deploy/                 # инструкции деплоя
+├── docker-compose.yml      # dev
+├── docker-compose.prod.yml # production
+└── BACKEND.md, README.md
 ```
 
-## Пример сценария
+---
 
-1. `POST /v1/auth/register` — создать пользователя
-2. `POST /v1/accounts` — создать счёт
-3. `POST /v1/transactions` — ручной расход
-4. `POST /v1/receipts/qr` — загрузить QR чека
+## Категории (системные)
 
-## Миграции
+Справочник: `app/core/category_taxonomy.py` (синхронизирован с сидером).
+
+**Расходы:** Продукты (Молочные, Сладости, Снэки, Никотин, Алкоголь, …), Здоровье, Дом, Транспорт, Развлечения, Одежда, Связь, Образование, Подарки, **Животные**, Прочее.
+
+**Доходы:** Зарплата, Подработка, Возвраты, Прочие доходы.
 
 ```bash
+python scripts/seed_categories.py   # безопасно на prod — только добавляет/обновляет
+```
+
+---
+
+## Скрипты
+
+```bash
+# Миграции
 alembic upgrade head
 alembic revision --autogenerate -m "описание"
-```
 
-## Сидеры
-
-```bash
-python scripts/seed_categories.py
-```
-
-Создаёт системные категории расходов (Продукты, Здоровье, Дом, …) и доходов (Зарплата, Подработка, …) с подкатегориями.
-
-### Сброс товаров и чеков (для повторного теста)
-
-```bash
+# Сброс чеков и товаров (для повторного теста AI)
 python scripts/clean_receipt_data.py --all
+python scripts/clean_receipt_data.py --qr-transactions
+python scripts/clean_receipt_data.py --products
 ```
 
-Удаляет все QR-транзакции (с возвратом суммы на счета), товары и алиасы — чтобы снова проверить нормализацию Groq/GPT.
+---
 
-## Веб-приложение
+## Типичный сценарий
 
-Лёгкий клиент в папке [`web/`](web/):
+1. `POST /v1/auth/register` — пользователь + JWT
+2. `POST /v1/accounts` — счёт `{ "name": "Карта", "balance": 0 }`
+3. `POST /v1/transactions` — ручной расход
+4. `POST /v1/receipts/qr` — QR чека `{ "account_id": "...", "qr": "t=...&s=..." }`
+5. `GET /v1/transactions?from=2026-06-01&to=2026-06-30` — история за период
 
-```bash
-# Backend на :8000, затем:
-cd web && npm install && npm run dev
-```
+Или через UI: http://localhost:5173
 
-Откройте http://localhost:5173 — регистрация, счета, операции, QR-чеки.
+---
+
+## Стек
+
+| Часть | Технологии |
+|-------|------------|
+| API | FastAPI, SQLAlchemy 2, Pydantic 2, Alembic |
+| БД | MySQL 8 |
+| Auth | JWT (python-jose), bcrypt |
+| Чеки | proverkacheka.com API |
+| AI | OpenAI SDK → Groq / xAI / GPT |
+| Web | React 18, TypeScript, Vite, Tailwind |
+| Mobile | Capacitor 6, ML Kit barcode |

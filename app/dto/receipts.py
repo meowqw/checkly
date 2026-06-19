@@ -7,12 +7,12 @@ from app.dto.transactions import MerchantBriefDTO, TransactionDetailDTO, Transac
 
 
 class QrReceiptRequestDTO(BaseModel):
-    account_id: str
-    qr: str = Field(min_length=10)
+    account_id: str = Field(description="UUID счёта для списания")
+    qr: str = Field(min_length=10, description="Строка QR-кода с чека (ФН, ФД, ФП, дата, сумма)")
 
 
 class QrReceiptResponseDTO(BaseModel):
-    transaction: TransactionDetailDTO
+    transaction: TransactionDetailDTO = Field(description="Созданная транзакция с позициями чека")
 
 
 # --- Receipt Provider DTOs ---

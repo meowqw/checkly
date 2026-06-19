@@ -2,6 +2,7 @@
 from typing import Annotated
 
 from fastapi import Depends, Header
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from app.core.dates import resolve_timezone
@@ -13,10 +14,21 @@ from app.repositories.user_repository import UserRepository
 
 DbSession = Annotated[Session, Depends(get_db)]
 
+bearer_scheme = HTTPBearer(
+    auto_error=False,
+    description="JWT access token из ответа /v1/auth/login или /v1/auth/register",
+)
 
-def get_request_timezone(
-    x_timezone: Annotated[str | None, Header(alias="X-Timezone")] = None,
-) -> str:
+XTimezoneHeader = Annotated[
+    str | None,
+    Header(
+        alias="X-Timezone",
+        description="Часовой пояс IANA (например Europe/Moscow). Опционально.",
+    ),
+]
+
+
+def get_request_timezone(x_timezone: XTimezoneHeader = None) -> str:
     return resolve_timezone(x_timezone)
 
 
@@ -25,11 +37,11 @@ RequestTimezone = Annotated[str, Depends(get_request_timezone)]
 
 def get_current_user(
     db: DbSession,
-    authorization: Annotated[str | None, Header()] = None,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)] = None,
 ) -> User:
-    if not authorization or not authorization.startswith("Bearer "):
+    if not credentials:
         raise UnauthorizedError()
-    token = authorization.removeprefix("Bearer ").strip()
+    token = credentials.credentials
     try:
         payload = decode_access_token(token)
     except ValueError as exc:
@@ -51,7 +63,7 @@ CurrentUser = Annotated[User, Depends(get_current_user)]
 def get_user_timezone(
     db: DbSession,
     user: CurrentUser,
-    x_timezone: Annotated[str | None, Header(alias="X-Timezone")] = None,
+    x_timezone: XTimezoneHeader = None,
 ) -> str:
     stored = resolve_timezone(user.timezone)
     if x_timezone:

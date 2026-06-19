@@ -1,34 +1,55 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import * as data from "@/api/data-service";
 import { ApiError, type Category } from "@/api/client";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { CreateCategorySheet } from "@/components/CreateCategorySheet";
 import { PageHeader } from "@/components/mobile/PageHeader";
+import { RefreshBar } from "@/components/mobile/RefreshBar";
+import { CategoryListSkeleton } from "@/components/mobile/Skeleton";
+import { trackBackgroundFresh } from "@/lib/cache-first";
+import { subscribeCategoriesChanged } from "@/lib/data-events";
 import { cn } from "@/lib/utils";
 
 export default function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [filter, setFilter] = useState<"expense" | "income">("expense");
-  const [loading, setLoading] = useState(true);
+  const [booting, setBooting] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const hasEverLoaded = useRef(false);
 
-  const load = useCallback(() => {
-    setLoading(true);
-    setError("");
-    data
-      .getCategories()
-      .then((r) => setCategories(r.categories))
-      .catch((err) => {
-        setError(err instanceof ApiError ? err.message : "Не удалось загрузить категории");
-      })
-      .finally(() => setLoading(false));
-  }, []);
+  const load = useCallback(
+    (skipRevalidate = false) =>
+      (async () => {
+        if (!hasEverLoaded.current) setBooting(true);
+        setError("");
+
+        try {
+          const r = await data.getCategories(true, { skipRevalidate });
+          setCategories(r.categories);
+          hasEverLoaded.current = true;
+          setBooting(false);
+          if (!skipRevalidate) {
+            trackBackgroundFresh([r], setRefreshing);
+          }
+        } catch (err) {
+          if (!hasEverLoaded.current) {
+            setError(err instanceof ApiError ? err.message : "Не удалось загрузить категории");
+            setBooting(false);
+          }
+        }
+      })(),
+    []
+  );
 
   useEffect(() => {
-    load();
+    void load(false);
+    return subscribeCategoriesChanged(() => {
+      void load(true);
+    });
   }, [load]);
 
   const roots = useMemo(() => {
@@ -48,7 +69,7 @@ export default function CategoriesPage() {
     setDeletingId(cat.id);
     try {
       await data.deleteCategory(cat.id);
-      load();
+      void load(true);
     } catch (err) {
       alert(err instanceof ApiError ? err.message : "Не удалось удалить");
     } finally {
@@ -92,9 +113,11 @@ export default function CategoriesPage() {
         ))}
       </div>
 
-      {loading ? (
-        <p className="py-12 text-center text-sm text-neutral-400">Загрузка...</p>
-      ) : error ? (
+      <RefreshBar active={refreshing} />
+
+      {booting && !hasEverLoaded.current ? (
+        <CategoryListSkeleton />
+      ) : error && !hasEverLoaded.current ? (
         <p className="py-12 text-center text-sm text-red-600">{error}</p>
       ) : (
         <div className="space-y-3 pb-4">

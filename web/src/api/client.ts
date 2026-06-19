@@ -173,6 +173,26 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+
+  stats: (params?: Record<string, string>) => {
+    const q = params ? "?" + new URLSearchParams(params).toString() : "";
+    return request<PeriodStats>(`/v1/stats${q}`);
+  },
+};
+
+export type CategoryStat = {
+  category_id?: string | null;
+  name: string;
+  amount: number;
+  percent: number;
+  color?: string | null;
+};
+
+export type PeriodStats = {
+  expense: number;
+  income: number;
+  categories: CategoryStat[];
+  recent_expenses: Transaction[];
 };
 
 export type Account = { id: string; name: string; balance: number };

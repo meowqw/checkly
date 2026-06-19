@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 type Props = {
   open: boolean;
   onClose: () => void;
+  needsAccount?: boolean;
 };
 
 const ACTIONS = [
@@ -28,7 +29,7 @@ const ACTIONS = [
   },
 ] as const;
 
-export function FabActionMenu({ open, onClose }: Props) {
+export function FabActionMenu({ open, onClose, needsAccount = false }: Props) {
   const { online } = useSync();
 
   useEffect(() => {
@@ -53,7 +54,8 @@ export function FabActionMenu({ open, onClose }: Props) {
 
       <div className="fixed bottom-[calc(4.5rem+env(safe-area-inset-bottom))] left-1/2 z-50 flex w-[min(100%,280px)] -translate-x-1/2 flex-col gap-2 px-4 lg:hidden">
         {ACTIONS.map((action) => {
-          const disabled = action.needsOnline && !online;
+          const disabled =
+            needsAccount || (action.needsOnline && !online);
           const Icon = action.icon;
           const content = (
             <>
@@ -68,10 +70,14 @@ export function FabActionMenu({ open, onClose }: Props) {
               <span className="min-w-0 flex-1 text-left">
                 <span className="block text-sm font-semibold">{action.label}</span>
                 <span className="block text-[11px] text-neutral-400">
-                  {disabled ? "Нужен интернет" : action.hint}
+                  {needsAccount
+                    ? "Сначала создайте счёт"
+                    : disabled
+                      ? "Нужен интернет"
+                      : action.hint}
                 </span>
               </span>
-              {disabled && <WifiOff size={14} className="shrink-0 text-neutral-300" />}
+              {disabled && !needsAccount && <WifiOff size={14} className="shrink-0 text-neutral-300" />}
             </>
           );
 
@@ -114,7 +120,7 @@ export function FabButton({ open, onClick }: { open: boolean; onClick: () => voi
         className={cn(
           "flex h-12 w-12 items-center justify-center rounded-full bg-brand text-white shadow-lg shadow-brand/30",
           "transition-all duration-300 ease-out",
-          open && "rotate-45 scale-105 bg-neutral-800 shadow-black/20"
+          open && "rotate-45 bg-neutral-800 shadow-black/20"
         )}
       >
         <PlusIcon open={open} />
@@ -133,7 +139,7 @@ function PlusIcon({ open }: { open: boolean }) {
       stroke="currentColor"
       strokeWidth="2.5"
       strokeLinecap="round"
-      className={cn("transition-transform duration-300", open && "scale-110")}
+      className={cn("transition-transform duration-300", open && "rotate-90")}
     >
       <path d="M12 5v14M5 12h14" />
     </svg>

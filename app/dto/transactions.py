@@ -7,73 +7,82 @@ from app.core.enums import Currency, TransactionSource, TransactionType
 
 
 class AccountBriefDTO(BaseModel):
-    id: str
-    name: str
+    id: str = Field(description="UUID счёта")
+    name: str = Field(description="Название счёта")
 
 
 class MerchantBriefDTO(BaseModel):
-    id: str | None = None
-    name: str
+    id: str | None = Field(default=None, description="UUID магазина")
+    name: str = Field(description="Название магазина")
+
+
+class CategoryBriefDTO(BaseModel):
+    name: str = Field(description="Отображаемое имя категории")
 
 
 class TransactionItemBriefDTO(BaseModel):
-    id: str | None = None
-    raw_name: str
-    amount: int
-    category_id: str | None = None
-    category: dict | None = None
+    id: str | None = Field(default=None, description="UUID позиции чека")
+    raw_name: str = Field(description="Название товара из чека")
+    amount: int = Field(description="Сумма позиции в копейках")
+    category_id: str | None = Field(default=None, description="UUID категории")
+    category: CategoryBriefDTO | None = Field(default=None, description="Краткая информация о категории")
 
 
 class TransactionListItemDTO(BaseModel):
-    id: str
-    type: str
-    amount: int
-    currency: str
-    occurred_at: datetime
-    source: str
-    comment: str | None = None
-    title: str
-    account: AccountBriefDTO | None = None
-    merchant: MerchantBriefDTO | None = None
-    category: str | None = None
-    items_count: int = 0
-    items: list[TransactionItemBriefDTO] | None = None
+    id: str = Field(description="UUID транзакции")
+    type: str = Field(description="Тип: expense или income")
+    amount: int = Field(description="Сумма в копейках")
+    currency: str = Field(description="Валюта (RUB)")
+    occurred_at: datetime = Field(description="Дата и время операции")
+    source: str = Field(description="Источник: manual, qr_receipt, ocr, import")
+    comment: str | None = Field(default=None, description="Комментарий")
+    title: str = Field(description="Заголовок для списка (категория, магазин или комментарий)")
+    account: AccountBriefDTO | None = Field(default=None, description="Счёт")
+    merchant: MerchantBriefDTO | None = Field(default=None, description="Магазин (для чеков)")
+    category: str | None = Field(
+        default=None,
+        description="Отображаемое имя категории (не UUID), напр. «Продукты › Молочное»",
+    )
+    items_count: int = Field(default=0, description="Число позиций в чеке")
+    items: list[TransactionItemBriefDTO] | None = Field(
+        default=None, description="Позиции чека (если запрошены)"
+    )
 
 
 class TransactionsListResponseDTO(BaseModel):
-    transactions: list[TransactionListItemDTO]
+    transactions: list[TransactionListItemDTO] = Field(description="Список транзакций")
 
 
 class CreateManualTransactionRequestDTO(BaseModel):
-    account_id: str
-    type: TransactionType
-    amount: int = Field(gt=0)
-    currency: Currency = Currency.RUB
-    occurred_at: datetime
-    category_id: str | None = None
-    comment: str | None = None
+    account_id: str = Field(description="UUID счёта")
+    type: TransactionType = Field(description="Тип: expense или income")
+    amount: int = Field(gt=0, description="Сумма в копейках")
+    currency: Currency = Field(default=Currency.RUB, description="Валюта")
+    occurred_at: datetime = Field(description="Дата и время (локальное, без timezone)")
+    category_id: str | None = Field(default=None, description="UUID категории")
+    comment: str | None = Field(default=None, description="Комментарий")
 
 
 class UpdateTransactionRequestDTO(BaseModel):
-    amount: int | None = Field(default=None, gt=0)
-    category_id: str | None = None
-    comment: str | None = None
+    amount: int | None = Field(default=None, gt=0, description="Новая сумма в копейках")
+    category_id: str | None = Field(default=None, description="UUID категории")
+    comment: str | None = Field(default=None, description="Новый комментарий")
 
 
 class TransactionDetailDTO(BaseModel):
-    id: str
-    amount: int
-    source: str
-    type: str | None = None
-    currency: str | None = None
-    occurred_at: datetime | None = None
-    comment: str | None = None
-    merchant: MerchantBriefDTO | None = None
-    items: list[TransactionItemBriefDTO] | None = None
+    id: str = Field(description="UUID транзакции")
+    amount: int = Field(description="Сумма в копейках")
+    source: str = Field(description="Источник: manual, qr_receipt, …")
+    type: str | None = Field(default=None, description="Тип: expense или income")
+    currency: str | None = Field(default=None, description="Валюта")
+    occurred_at: datetime | None = Field(default=None, description="Дата и время")
+    comment: str | None = Field(default=None, description="Комментарий")
+    merchant: MerchantBriefDTO | None = Field(default=None, description="Магазин")
+    items: list[TransactionItemBriefDTO] | None = Field(default=None, description="Позиции чека")
 
 
 class TransactionResponseDTO(BaseModel):
-    transaction: TransactionDetailDTO
+    transaction: TransactionDetailDTO = Field(description="Транзакция")
 
 
 class TransactionFilterDTO(BaseModel):
@@ -106,7 +115,7 @@ class UpdateTransactionDTO(BaseModel):
 
 
 class UpdateTransactionItemRequestDTO(BaseModel):
-    category_id: str
+    category_id: str = Field(description="UUID новой категории для позиции")
 
 
 class UpdateTransactionItemDTO(BaseModel):

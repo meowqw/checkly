@@ -33,7 +33,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   const inflight = useRef<Promise<void> | null>(null);
   const hasLoaded = useRef(false);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (skipRevalidate = false) => {
     if (!isAuthenticated) return;
 
     if (inflight.current) {
@@ -46,7 +46,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
       if (showSpinner) setLoading(true);
       setError("");
       try {
-        const res = await data.getAccounts();
+        const res = await data.getAccounts({ skipRevalidate });
         setAccounts(res.accounts);
         setFromCache(res.fromCache);
         hasLoaded.current = true;
@@ -77,7 +77,7 @@ export function AccountsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!isAuthenticated) return;
     return subscribeAccountsChanged(() => {
-      void refresh();
+      void refresh(true);
     });
   }, [isAuthenticated, refresh]);
 

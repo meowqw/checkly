@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import * as data from "@/api/data-service";
 import type { Category, TransactionItem } from "@/api/client";
@@ -92,55 +93,60 @@ export function ItemCategorySheet({
     }
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 animate-fade-in">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/40 p-0 animate-fade-in">
       <button type="button" className="absolute inset-0" aria-label="Закрыть" onClick={onClose} />
-      <div className="relative z-10 max-h-[85vh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white px-4 pb-safe-b pt-4 shadow-xl animate-slide-up">
-        <div className="mb-3 flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="text-xs text-neutral-400">Категория позиции</p>
-            <p className="truncate text-sm font-semibold">{item.raw_name}</p>
+      <div className="relative z-10 flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl bg-white shadow-xl animate-slide-up">
+        <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-4 pt-4">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs text-neutral-400">Категория позиции</p>
+              <p className="truncate text-sm font-semibold">{item.raw_name}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100"
+            >
+              <X size={18} />
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-100"
-          >
-            <X size={18} />
-          </button>
+
+          <p className="mb-3 text-xs text-neutral-500">
+            {txType === "expense"
+              ? "Для товаров из чека категория сохранится и подставится при следующих покупках."
+              : "Категория будет обновлена для этой операции."}
+          </p>
+
+          {error && (
+            <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+              {error}
+            </p>
+          )}
+
+          <CategoryPicker
+            roots={rootCategories}
+            subcategories={subcategories}
+            parentId={parentCategoryId}
+            subcategoryId={subcategoryId}
+            onParentChange={onParentChange}
+            onSubcategoryChange={setSubcategoryId}
+          />
         </div>
 
-        <p className="mb-3 text-xs text-neutral-500">
-          {txType === "expense"
-            ? "Для товаров из чека категория сохранится и подставится при следующих покупках."
-            : "Категория будет обновлена для этой операции."}
-        </p>
-
-        {error && (
-          <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {error}
-          </p>
-        )}
-
-        <CategoryPicker
-          roots={rootCategories}
-          subcategories={subcategories}
-          parentId={parentCategoryId}
-          subcategoryId={subcategoryId}
-          onParentChange={onParentChange}
-          onSubcategoryChange={setSubcategoryId}
-        />
-
-        <Button
-          variant="brand"
-          className="mt-4 w-full"
-          disabled={loading || !finalCategoryId}
-          onClick={() => void save()}
-        >
-          {loading ? "Сохранение..." : "Сохранить"}
-        </Button>
+        <div className="shrink-0 border-t border-neutral-100 bg-white px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+          <Button
+            variant="brand"
+            className="w-full"
+            disabled={loading || !finalCategoryId}
+            onClick={() => void save()}
+          >
+            {loading ? "Сохранение..." : "Сохранить"}
+          </Button>
+        </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 

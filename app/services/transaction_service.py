@@ -4,7 +4,7 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.core.dates import normalize_range_end, normalize_range_start, now_local, to_storage_datetime
+from app.core.dates import now_local, to_storage_datetime
 from app.core.enums import Currency, TransactionSource, TransactionType
 from app.core.exceptions import ExternalServiceError, ForbiddenError, NotFoundError
 from app.core.uuid_utils import new_uid
@@ -27,14 +27,12 @@ from app.dto.receipts import (
     ReceiptProviderInputDTO,
 )
 from app.dto.transactions import (
-    AccountBriefDTO,
     CreateManualTransactionDTO,
     CreateTransactionFromReceiptDTO,
     MerchantBriefDTO,
     TransactionDetailDTO,
     TransactionFilterDTO,
     TransactionItemBriefDTO,
-    TransactionListItemDTO,
     TransactionResponseDTO,
     TransactionsListResponseDTO,
     UpdateTransactionDTO,
@@ -53,16 +51,10 @@ from app.repositories.transaction_repository import TransactionRepository
 from app.repositories.user_product_override_repository import UserProductCategoryOverrideRepository
 from app.services.category_service import CategoryService
 from app.services.product_matching_service import ProductMatchingService
+from app.services.transaction_mapper import map_item_to_brief, map_transaction_to_list_item
+from app.services.transaction_queries import list_transactions_for_filters
 
 logger = logging.getLogger(__name__)
-
-
-def _category_display_name(category) -> str | None:
-    if not category:
-        return None
-    if category.parent:
-        return f"{category.parent.name} › {category.name}"
-    return category.name
 
 
 class TransactionService:
@@ -86,63 +78,9 @@ class TransactionService:
         self._product_normalizer = product_normalizer or get_product_normalizer()
 
     def list_transactions(self, filters: TransactionFilterDTO) -> TransactionsListResponseDTO:
-        account_id = None
-        if filters.account_uid:
-            account_id = self._transactions.get_account_id_by_uid(
-                filters.account_uid, filters.user_id
-            )
-            if not account_id:
-                raise NotFoundError("Счёт не найден")
-
-        rows = self._transactions.list_for_user(
-            user_id=filters.user_id,
-            from_date=normalize_range_start(filters.from_date, filters.timezone),
-            to_date=normalize_range_end(filters.to_date, filters.timezone),
-            transaction_type=filters.type.value if filters.type else None,
-            account_id=account_id,
-        )
+        rows = list_transactions_for_filters(self._transactions, filters)
         return TransactionsListResponseDTO(
-            transactions=[self._to_list_item_dto(t) for t in rows]
-        )
-
-    def _to_list_item_dto(self, transaction: Transaction) -> TransactionListItemDTO:
-        items = transaction.items or []
-        title = transaction.comment
-        if not title and transaction.merchant:
-            title = transaction.merchant.name
-        if not title and items:
-            title = items[0].raw_name
-        if not title:
-            title = "Операция"
-
-        category = None
-        if items and items[0].category:
-            category = _category_display_name(items[0].category)
-
-        account = None
-        if transaction.account:
-            account = AccountBriefDTO(id=transaction.account.uid, name=transaction.account.name)
-
-        merchant = None
-        if transaction.merchant:
-            merchant = MerchantBriefDTO(id=transaction.merchant.uid, name=transaction.merchant.name)
-
-        item_dtos = [self._map_item_to_brief(item) for item in items]
-
-        return TransactionListItemDTO(
-            id=transaction.uid,
-            type=transaction.type,
-            amount=transaction.amount,
-            currency=transaction.currency,
-            occurred_at=transaction.occurred_at,
-            source=transaction.source,
-            comment=transaction.comment,
-            title=title,
-            account=account,
-            merchant=merchant,
-            category=category,
-            items_count=len(items),
-            items=item_dtos if item_dtos else None,
+            transactions=[map_transaction_to_list_item(t) for t in rows]
         )
 
     def get_transaction(self, user_id: int, transaction_uid: str) -> TransactionResponseDTO:
@@ -334,7 +272,7 @@ class TransactionService:
                 category_id=category_id,
             )
             cat = self._category_for_brief(category_id, product.category, category_cache)
-            response_items.append(self._map_item_to_brief(tx_item, cat))
+            response_items.append(map_item_to_brief(tx_item, cat))
 
         created_products: dict[str, Product] = {}
 
@@ -377,7 +315,7 @@ class TransactionService:
                 product=product,
                 category_id=category.id if category else None,
             )
-            response_items.append(self._map_item_to_brief(tx_item, category))
+            response_items.append(map_item_to_brief(tx_item, category))
 
         self._adjust_account_balance(account.id, TransactionType.EXPENSE, receipt_data.receipt.total_sum)
         self._db.commit()
@@ -517,18 +455,6 @@ class TransactionService:
             cache[category_id] = self._db.get(Category, category_id)
         return cache[category_id] or fallback
 
-    def _map_item_to_brief(
-        self, item: TransactionItem, category: Category | None = None
-    ) -> TransactionItemBriefDTO:
-        cat = category or item.category
-        return TransactionItemBriefDTO(
-            id=item.uid,
-            raw_name=item.raw_name,
-            amount=item.amount,
-            category_id=cat.uid if cat else None,
-            category={"name": _category_display_name(cat)} if cat else None,
-        )
-
     def _get_user_transaction(self, uid: str, user_id: int) -> Transaction:
         transaction = self._transactions.get_by_uid_for_user(uid, user_id)
         if not transaction:
@@ -542,7 +468,7 @@ class TransactionService:
                 id=transaction.merchant.uid,
                 name=transaction.merchant.name,
             )
-        items = [self._map_item_to_brief(item) for item in transaction.items]
+        items = [map_item_to_brief(item) for item in transaction.items]
         return TransactionDetailDTO(
             id=transaction.uid,
             amount=transaction.amount,

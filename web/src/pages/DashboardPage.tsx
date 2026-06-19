@@ -1,17 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ScanLine } from "lucide-react";
+import { ChevronDown, ChevronUp, ScanLine } from "lucide-react";
 import * as data from "@/api/data-service";
-import { formatMoney } from "@/api/client";
+import { formatMoney, type CategoryStat, type PeriodStats } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
 import { CategoryProgress } from "@/components/dashboard/CategoryProgress";
+import { NoAccountsNotice } from "@/components/NoAccountsNotice";
 import { PeriodNavigator } from "@/components/mobile/PeriodNavigator";
+import { RefreshBar } from "@/components/mobile/RefreshBar";
+import { DashboardSkeleton } from "@/components/mobile/Skeleton";
 import { TxRow } from "@/components/mobile/TxRow";
 import { Button } from "@/components/ui/button";
+import { trackBackgroundFresh } from "@/lib/cache-first";
+import { resolveTransactionDotColor } from "@/lib/categories";
 import { getPeriodRange, toApiDateTimeRange, type Period } from "@/lib/dates";
-import { buildCategoryDisplayMap } from "@/lib/categories";
 import { subscribeTransactionsChanged } from "@/lib/data-events";
-import { formatStatAmount, loadCategoryStats, txRowFromList, type CategoryStat } from "@/lib/stats";
+import { colorMapFromStats, formatStatAmount, txRowFromList } from "@/lib/stats";
 
 type TxRowData = {
   id: string;
@@ -20,101 +24,136 @@ type TxRowData = {
   type: string;
   occurredAt: string;
   category: string;
+  source?: string;
+  items?: PeriodStats["recent_expenses"][number]["items"];
+  dotColor?: string | null;
 };
 
+const CATEGORY_PREVIEW = 5;
+
 export default function DashboardPage() {
-  const { accounts } = useAccounts();
+  const { accounts, loading: accountsLoading } = useAccounts();
   const [period, setPeriod] = useState<Period>("day");
   const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
   const [expenses, setExpenses] = useState(0);
   const [income, setIncome] = useState(0);
   const [categories, setCategories] = useState<CategoryStat[]>([]);
   const [transactions, setTransactions] = useState<TxRowData[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [booting, setBooting] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [loaded, setLoaded] = useState(false);
+  const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+  const hasEverLoaded = useRef(false);
 
   const range = useMemo(() => getPeriodRange(period, periodAnchor), [period, periodAnchor.getTime()]);
   const balance = accounts.reduce((s, a) => s + a.balance, 0);
 
+  const periodParams = useMemo(
+    () => toApiDateTimeRange(range.from, range.to),
+    [range.from.getTime(), range.to.getTime()]
+  );
+
+  const applyStats = useCallback((stats: PeriodStats) => {
+    setExpenses(stats.expense);
+    setIncome(stats.income);
+    setCategories(stats.categories);
+    const colorMap = colorMapFromStats(stats.categories);
+    setTransactions(
+      stats.recent_expenses.map((t) => {
+        const row = txRowFromList(t, new Map());
+        return {
+          ...row,
+          dotColor: resolveTransactionDotColor(t, colorMap),
+        };
+      })
+    );
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
 
-    const load = () => {
-      setLoading(true);
+    if (accountsLoading || accounts.length === 0) {
+      if (!accountsLoading && accounts.length === 0) {
+        setBooting(false);
+        setLoaded(true);
+      }
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const load = async (skipRevalidate = false) => {
+      if (!hasEverLoaded.current) setBooting(true);
       setError("");
-      const params = toApiDateTimeRange(range.from, range.to);
-      const weekRange = getPeriodRange("week", period === "week" ? periodAnchor : new Date());
-      const weekParams = toApiDateTimeRange(weekRange.from, weekRange.to);
 
-      return Promise.all([
-        data.getCategories(),
-        data.getTransactions(params),
-        data.getTransactions(weekParams),
-      ])
-        .then(([catRes, periodRes, weekRes]) => {
-          if (cancelled) return;
-
-          const periodTx = periodRes.transactions;
-          setExpenses(periodTx.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0));
-          setIncome(periodTx.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0));
-
-          const displayMap = buildCategoryDisplayMap(catRes.categories);
-          setCategories(
-            loadCategoryStats(
-              periodTx.filter((t) => t.type === "expense"),
-              catRes.categories
-            )
-          );
-
-          const recent = weekRes.transactions
-            .filter((t) => t.type === "expense")
-            .slice(0, 8);
-          setTransactions(recent.map((t) => txRowFromList(t, displayMap)));
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
+      try {
+        const statsRes = await data.getStats(periodParams, { skipRevalidate });
+        if (cancelled) return;
+        applyStats(statsRes.stats);
+        hasEverLoaded.current = true;
+        setLoaded(true);
+        setBooting(false);
+        if (!skipRevalidate) {
+          trackBackgroundFresh([statsRes], setRefreshing);
+        }
+      } catch (err) {
+        if (!cancelled && !hasEverLoaded.current) {
+          setError(err instanceof Error ? err.message : "Не удалось загрузить данные");
+          setBooting(false);
+        }
+      }
     };
 
-    void load();
+    void load(false);
     const unsub = subscribeTransactionsChanged(() => {
-      if (!cancelled) void load();
+      if (!cancelled) void load(true);
     });
 
     return () => {
       cancelled = true;
       unsub();
     };
-  }, [range.from.getTime(), range.to.getTime(), period, periodAnchor.getTime()]);
+  }, [periodParams, applyStats, accounts.length, accountsLoading]);
 
-  if (loading) {
-    return <p className="py-16 text-center text-sm text-neutral-400">Загрузка...</p>;
+  useEffect(() => {
+    setCategoriesExpanded(false);
+  }, [period, periodAnchor.getTime()]);
+
+  const visibleCategories = categoriesExpanded ? categories : categories.slice(0, CATEGORY_PREVIEW);
+  const hiddenCategoryCount = Math.max(0, categories.length - CATEGORY_PREVIEW);
+
+  if (booting && !loaded) {
+    return <DashboardSkeleton />;
   }
 
-  if (error) {
+  if (error && !loaded) {
+    return <p className="py-16 text-center text-sm text-red-600">{error}</p>;
+  }
+
+  if (!accountsLoading && accounts.length === 0) {
     return (
-      <p className="py-16 text-center text-sm text-red-600">
-        {error}
-      </p>
+      <div className="py-6">
+        <NoAccountsNotice />
+      </div>
     );
   }
 
   return (
     <>
-      <section className="mb-5 animate-scale-in">
+      <RefreshBar active={refreshing} />
+
+      <section className="mb-5 min-w-0 animate-scale-in">
         <p className="text-xs text-neutral-400">Общий баланс</p>
-        <p className="mt-0.5 text-3xl font-bold tabular-nums tracking-tight">{formatMoney(balance)}</p>
-        <div className="mt-3 flex gap-4 text-sm">
-          <div>
+        <p className="mt-0.5 break-all text-2xl font-bold tabular-nums tracking-tight sm:text-3xl">
+          {formatMoney(balance)}
+        </p>
+        <div className="mt-3 flex min-w-0 flex-wrap gap-x-4 gap-y-1 text-sm">
+          <div className="min-w-0">
             <span className="text-neutral-400">Расходы </span>
             <span className="font-semibold tabular-nums text-neutral-800">{formatMoney(expenses)}</span>
           </div>
-          <div>
+          <div className="min-w-0">
             <span className="text-neutral-400">Доходы </span>
             <span className="font-semibold tabular-nums text-brand">{formatMoney(income)}</span>
           </div>
@@ -131,17 +170,43 @@ export default function DashboardPage() {
 
       {categories.length > 0 && (
         <section className="mb-5">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-3 flex items-center justify-between gap-2">
             <h2 className="section-title">Категории</h2>
-            <span className="text-[11px] text-neutral-400">{formatMoney(expenses)}</span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {hiddenCategoryCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setCategoriesExpanded((v) => !v)}
+                  className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                  aria-expanded={categoriesExpanded}
+                  aria-label={
+                    categoriesExpanded ? "Свернуть список категорий" : `Показать ещё ${hiddenCategoryCount} категорий`
+                  }
+                >
+                  {categoriesExpanded ? (
+                    <>
+                      <ChevronUp size={13} />
+                      <span>Свернуть</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={13} />
+                      <span>+{hiddenCategoryCount}</span>
+                    </>
+                  )}
+                </button>
+              )}
+              <span className="text-[11px] text-neutral-400">{formatMoney(expenses)}</span>
+            </div>
           </div>
           <div className="space-y-3 stagger-in">
-            {categories.slice(0, 5).map((c) => (
+            {visibleCategories.map((c) => (
               <CategoryProgress
                 key={c.name}
                 name={c.name}
                 amount={formatStatAmount(c.amount)}
                 percent={c.percent}
+                color={c.color ?? undefined}
               />
             ))}
           </div>
@@ -165,14 +230,14 @@ export default function DashboardPage() {
 
         {transactions.length === 0 ? (
           <div className="py-8 text-center">
-            <p className="text-sm text-neutral-400">Пока нет трат</p>
-            <Link to="/add" className="mt-2 inline-block text-sm font-medium text-brand">
-              Добавить первую
+            <p className="text-sm text-neutral-400">Нет трат за выбранный период</p>
+            <Link to="/qr" className="mt-2 inline-block text-sm font-medium text-brand">
+              Сканировать чек
             </Link>
           </div>
         ) : (
           <div className="list-divider stagger-in">
-            {transactions.map((tx, i) => (
+            {transactions.map((tx) => (
               <TxRow
                 key={tx.id}
                 title={tx.title}
@@ -180,7 +245,7 @@ export default function DashboardPage() {
                 amount={tx.amount}
                 type={tx.type}
                 occurredAt={tx.occurredAt}
-                colorIndex={i}
+                dotColor={tx.dotColor}
               />
             ))}
           </div>

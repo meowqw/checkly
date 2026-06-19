@@ -1,9 +1,11 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import * as data from "@/api/data-service";
 import { formatMoney, rublesToKopecks } from "@/api/client";
 import { ApiError } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
+import { NoAccountsNotice } from "@/components/NoAccountsNotice";
 import { PageHeader } from "@/components/mobile/PageHeader";
+import { FormSkeleton } from "@/components/mobile/Skeleton";
 import { Button } from "@/components/ui/button";
 
 export default function AccountsPage() {
@@ -13,6 +15,12 @@ export default function AccountsPage() {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [showForm, setShowForm] = useState(false);
+
+  useEffect(() => {
+    if (!accountsLoading && accounts.length === 0) {
+      setShowForm(true);
+    }
+  }, [accountsLoading, accounts.length]);
 
   const create = async (e: FormEvent) => {
     e.preventDefault();
@@ -65,8 +73,14 @@ export default function AccountsPage() {
         </p>
       )}
 
+      {!accountsLoading && accounts.length === 0 && (
+        <div className="mb-4">
+          <NoAccountsNotice showAction={false} />
+        </div>
+      )}
+
       {accountsLoading && accounts.length === 0 ? (
-        <p className="py-12 text-center text-sm text-neutral-400">Загрузка...</p>
+        <FormSkeleton />
       ) : (
         <>
           {showForm && (
@@ -103,7 +117,7 @@ export default function AccountsPage() {
                 </Button>
               </div>
             ))}
-            {accounts.length === 0 && (
+            {accounts.length === 0 && !showForm && (
               <p className="px-3 py-8 text-center text-sm text-neutral-400">Нет счетов</p>
             )}
           </div>

@@ -6,6 +6,8 @@ import { rublesToKopecks, type Category } from "@/api/client";
 import { ApiError } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
 import { CategoryPicker } from "@/components/CategoryPicker";
+import { NoAccountsNotice } from "@/components/NoAccountsNotice";
+import { FormSkeleton } from "@/components/mobile/Skeleton";
 import { Button } from "@/components/ui/button";
 import { getRootCategories, getSubcategories } from "@/lib/categories";
 import { toApiDateTimeLocal, toDateTimeLocalValue } from "@/lib/dates";
@@ -41,13 +43,23 @@ export default function AddTransactionPage() {
   }, [accounts, accountId]);
 
   useEffect(() => {
+    let cancelled = false;
     data
       .getCategories()
-      .then((cat) => setCategoryTree(cat.categories))
-      .catch((err) => {
-        setError(err instanceof ApiError ? err.message : "Не удалось загрузить данные");
+      .then((cat) => {
+        if (cancelled) return;
+        setCategoryTree(cat.categories);
+        setInitialLoading(false);
       })
-      .finally(() => setInitialLoading(false));
+      .catch((err) => {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : "Не удалось загрузить данные");
+          setInitialLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -88,9 +100,19 @@ export default function AddTransactionPage() {
   };
 
   return (
-    <div className="-mx-4 px-4 md:mx-0 md:px-0">
+    <>
       {initialLoading || accountsLoading ? (
-        <p className="py-16 text-center text-sm text-neutral-400">Загрузка...</p>
+        <FormSkeleton />
+      ) : accounts.length === 0 ? (
+        <>
+          <Link
+            to="/"
+            className="mb-3 inline-flex items-center gap-1.5 text-sm text-neutral-500 active:text-neutral-900"
+          >
+            <ArrowLeft size={16} /> Назад
+          </Link>
+          <NoAccountsNotice />
+        </>
       ) : (
         <>
       <Link
@@ -203,6 +225,6 @@ export default function AddTransactionPage() {
       </form>
         </>
       )}
-    </div>
+    </>
   );
 }

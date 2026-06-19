@@ -51,6 +51,7 @@
 finance_manager/
 ├── app/
 │   ├── main.py                 # FastAPI app, CORS, exception handlers, /health
+│   ├── openapi.py              # RU-описания для Swagger (теги, ошибки)
 │   ├── config.py               # Settings из .env
 │   ├── api/
 │   │   ├── deps.py             # DbSession, CurrentUser, UserTimezone, RequestTimezone
@@ -60,9 +61,14 @@ finance_manager/
 │   │       ├── accounts.py
 │   │       ├── categories.py
 │   │       ├── transactions.py
-│   │       └── receipts.py
-│   ├── dto/                    # Pydantic: *RequestDTO, *ResponseDTO, service DTO
-│   ├── services/               # Бизнес-логика
+│   │       ├── receipts.py
+│   │       └── stats.py
+│   ├── dto/                    # Pydantic: *RequestDTO, *ResponseDTO (+ stats.py)
+│   ├── services/
+│   │   ├── transaction_service.py
+│   │   ├── stats_service.py    # агрегаты для /v1/stats
+│   │   ├── transaction_mapper.py   # ORM → TransactionListItemDTO (shared)
+│   │   └── transaction_queries.py  # list_transactions_for_filters (shared)
 │   ├── repositories/           # SQLAlchemy-запросы
 │   ├── interfaces/             # ABC: ReceiptProvider, ProductNormalizer
 │   ├── implementations/        # proverkacheka, GPT/Grok/Groq normalizers
@@ -72,6 +78,7 @@ finance_manager/
 │   │   ├── security.py         # JWT, hash password
 │   │   ├── exceptions.py
 │   │   ├── category_taxonomy.py  # дерево категорий + keyword hints для LLM
+│   │   ├── category_display.py   # category_display_name() для API
 │   │   └── uuid_utils.py
 │   └── database/
 │       ├── __init__.py         # engine, SessionLocal, get_db
@@ -107,13 +114,15 @@ HTTP → api/v1/*.py (тонкий контроллер)
 ## 4. API
 
 **Базовый prefix:** `/v1`  
-**OpenAPI:** `http://localhost:8000/docs`  
+**OpenAPI:** `http://localhost:8000/docs` (описания на **русском**, `HTTPBearer`, `X-Timezone`)  
 **Health:** `GET /health` → `{"status":"ok"}`
 
-**Auth:** `Authorization: Bearer <jwt>`  
+**Auth:** `Authorization: Bearer <jwt>` (схема в Swagger)  
 **Timezone:** `X-Timezone: Europe/Moscow` (IANA). На register/login сохраняется в `users.timezone`; на авторизованных запросах синхронизируется с заголовком.
 
-**Ошибки:** `{"error": "сообщение"}` + HTTP-код
+**Ошибки:** `{"error": "сообщение"}` + HTTP-код (400/401/403/404/409/502 описаны на роутах)
+
+Метаданные OpenAPI: `app/openapi.py` + `Field(description=...)` в DTO + `summary`/`description` на роутерах.
 
 ### 4.1 Auth — `/v1/auth`
 
@@ -182,11 +191,15 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 **List item:** `{id, type, amount, currency, occurred_at, source, comment, title, account, merchant, category, items_count, items}`
 
+- `category` в list — **только manual**; для `qr_receipt` → `null`
+- `items[].category` — `{name}` (`CategoryBriefDTO`), не `dict`
+- Маппинг list/detail: `transaction_mapper.py` (используется и в `TransactionService`, и в `StatsService`)
+
 **Detail item:** `{id, amount, source, type, currency, occurred_at, comment, merchant, items: [{id, raw_name, amount, category_id, category}]}`
 
 `source`: `manual` | `qr_receipt` | `ocr` | `import`
 
-Файлы: `app/api/v1/transactions.py`, `app/services/transaction_service.py`, `app/dto/transactions.py`
+Файлы: `app/api/v1/transactions.py`, `app/services/transaction_service.py`, `app/services/transaction_mapper.py`, `app/dto/transactions.py`
 
 ### 4.5 Receipts — `/v1/receipts`
 
@@ -195,6 +208,36 @@ HTTP → api/v1/*.py (тонкий контроллер)
 | POST | `/qr` | `{account_id, qr}` | `{transaction}` (detail) |
 
 Файл: `app/api/v1/receipts.py`
+
+### 4.6 Stats — `/v1/stats`
+
+| Method | Path | Query | Response |
+|--------|------|-------|----------|
+| GET | `/` | `from`, `to`, `account_id` | см. ниже |
+
+```json
+{
+  "expense": 125000,
+  "income": 300000,
+  "categories": [
+    { "category_id": "uuid|null", "name": "Продукты › Снэки", "amount": 4500, "percent": 12, "color": "#16a34a" }
+  ],
+  "recent_expenses": [ /* до 8 TransactionListItemDTO, compact */ ]
+}
+```
+
+**Правила агрегации (`StatsService`):**
+- `expense` / `income` — сумма `transaction.amount` за период
+- `categories` — **только расходы**; для чеков суммируются **позиции** (`transaction_items.amount`), не сумма чека целиком
+- `percent` — доля от общих расходов за период
+- `color` — из категории; у подкатегорий наследуется `parent.color`
+- `recent_expenses` — последние 8 расходов (`occurred_at DESC`); `compact=True` — без всех позиций чека (легче payload)
+
+Query **`type` нет** — stats всегда считает и расходы, и доходы.
+
+Файлы: `app/api/v1/stats.py`, `app/services/stats_service.py`, `app/dto/stats.py`, `app/services/transaction_queries.py`
+
+**Главная страница фронта** использует только этот endpoint (не тянет полный `/transactions`).
 
 ---
 
@@ -278,8 +321,8 @@ docker compose exec app alembic upgrade head
 Синхронизирован с `scripts/seed_categories.py`.
 
 **Расходы (пример):**
-- Продукты → Молочные, Сладости, Овощи и фрукты, Напитки, Мясо и рыба, **Алкоголь**, **Крупы**
-- Здоровье, Дом, Транспорт, Развлечения, Одежда, Связь, Образование, Подарки, Прочее
+- Продукты → Молочные, Сладости, Овощи и фрукты, Напитки, Мясо и рыба, **Алкоголь**, **Крупы**, **Снэки**, **Никотин**
+- Здоровье, Дом, Транспорт, Развлечения, Одежда, Связь, Образование, Подарки, **Животные**, Прочее
 
 **Доходы:** Зарплата, Подработка, Возвраты, Прочие доходы
 
@@ -295,7 +338,7 @@ python scripts/seed_categories.py
 # или автоматически при docker compose up
 ```
 
-Идемпотентен: не дублирует, обновляет icon/color.
+Идемпотентен: не дублирует, обновляет icon/color. Безопасен для prod — существующие категории не удаляются, только добавляются недостающие.
 
 ### Lookup для чеков
 
@@ -385,7 +428,20 @@ Prompt включает дерево категорий из `build_taxonomy_pro
 
 ### Отображение категории
 
-`_category_display_name`: `"Родитель › Дочерняя"`
+`category_display_name()` в `app/core/category_display.py`: `"Родитель › Дочерняя"`
+
+В **списке** транзакций поле `category` — только для **manual** (из категории первой позиции). Для `qr_receipt` → `category: null`; категории только у **позиций** внутри чека.
+
+---
+
+## 11.1 StatsService
+
+Файл: `app/services/stats_service.py`
+
+- Загрузка строк: `list_transactions_for_filters()` (`transaction_queries.py`) — те же фильтры, что у list transactions
+- Агрегация по категориям — в Python (не SQL GROUP BY); для MVP достаточно
+- `recent_expenses`: `map_transaction_to_list_item(tx, compact=True)` из `transaction_mapper.py`
+- **Не** создаёт `TransactionService` (нет лишней инициализации LLM/receipt provider)
 
 ---
 
@@ -461,13 +517,16 @@ Handlers в `main.py`: `AppError`, `IntegrityError` → 409, generic → 500.
 
 ## 16. Конвенции для правок
 
-1. Новый endpoint → `api/v1/` + service + repository + dto
+1. Новый endpoint → `api/v1/` + service + repository + dto + **`openapi.py`** (тег/описание)
 2. Новая таблица → model + alembic migration (не `create_all` в prod)
-3. Новая системная категория → **`category_taxonomy.py`** + `seed_categories.py` + перезапуск сидера
+3. Новая системная категория → **`category_taxonomy.py`** + перезапуск сидера (идемпотентно, prod-safe)
 4. Изменение LLM prompt → `product_normalizer_common.py` + `category_taxonomy.py`
-5. Публичные ID — только `uid`
-6. Деньги — только копейки, без float
-7. DTO: `*RequestDTO` / `*ResponseDTO` для API; внутренние service DTO без суффиксов Request/Response
+5. List-маппинг транзакций → **`transaction_mapper.py`** (не дублировать в сервисах)
+6. Фильтрованный список tx → **`transaction_queries.py`**
+7. Агрегаты для UI → **`stats_service.py`**, не считать на фронте (offline fallback — исключение)
+8. Публичные ID — только `uid`
+9. Деньги — только копейки, без float
+10. DTO: `*RequestDTO` / `*ResponseDTO` для API; внутренние service DTO без суффиксов Request/Response
 
 ---
 
@@ -476,10 +535,15 @@ Handlers в `main.py`: `AppError`, `IntegrityError` → 409, generic → 500.
 | Задача | Файл |
 |--------|------|
 | Новый endpoint | `app/api/v1/*.py` |
+| Swagger RU | `app/openapi.py`, DTO `Field(description=...)`, роуты |
 | Бизнес-логика | `app/services/*.py` |
+| List tx DTO | `app/services/transaction_mapper.py` |
+| Фильтры tx / stats query | `app/services/transaction_queries.py` |
+| Статистика | `app/services/stats_service.py`, `app/dto/stats.py` |
 | SQL | `app/repositories/*.py` |
 | Схема | `app/database/models.py` |
 | Категории LLM | `app/core/category_taxonomy.py` |
+| Имя категории в API | `app/core/category_display.py` |
 | Чеки | `app/implementations/proverkacheka_receipt_provider.py` |
 | LLM выбор | `app/implementations/product_normalizer_factory.py` |
 | Auth deps | `app/api/deps.py` |
@@ -492,6 +556,7 @@ POST /v1/auth/register
 POST /v1/accounts          {"name":"Карта","balance":0}
 POST /v1/transactions      {manual expense}
 POST /v1/receipts/qr       {"account_id":"...","qr":"t=...&s=..."}
+GET  /v1/stats?from=2026-06-01&to=2026-06-30
 GET  /v1/transactions?from=2026-06-01&to=2026-06-30
 PATCH /v1/transactions/{id}/items/{item_id}  {"category_id":"..."}
 ```

@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ReceiptText } from "lucide-react";
-import { ApiError } from "@/api/client";
+import { ApiError, api } from "@/api/client";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -23,7 +23,13 @@ export default function LoginPage() {
     try {
       if (tab === "login") await doLogin(login, password);
       else await register(email, login, password);
-      navigate("/");
+
+      const { accounts } = await api.accounts();
+      if (accounts.length === 0) {
+        navigate("/accounts", { state: { needsAccount: true }, replace: true });
+      } else {
+        navigate("/");
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Ошибка");
     } finally {
@@ -32,7 +38,7 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col bg-white px-4 pb-safe-b pt-12">
+    <div className="flex min-h-screen flex-col overflow-x-hidden bg-white px-4 pb-safe-b pt-12">
       <div className="mx-auto w-full max-w-sm flex-1 animate-page-in">
         <div className="mb-10 flex items-center gap-3">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-brand text-white">

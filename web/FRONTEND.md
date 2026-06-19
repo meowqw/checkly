@@ -51,9 +51,11 @@ web/
 ├── .env.production.local        # gitignored, обязателен для APK
 ├── scripts/
 │   ├── build-apk.sh
-│   └── apply-android-icon.sh
+│   ├── apply-android-icon.sh
+│   └── generate_android_icons.py
 ├── resources/
-│   └── checkly-icon-512.png
+│   ├── checkly-icon-512.png       # исходник (может быть не квадратным)
+│   └── checkly-icon-1024.png      # генерируется скриптом — квадрат для preview
 ├── android/                     # Capacitor Android (gitignored)
 └── src/
     ├── main.tsx                 # BrowserRouter
@@ -70,17 +72,19 @@ web/
     ├── components/
     │   ├── Layout.tsx
     │   ├── ProtectedRoute.tsx
+    │   ├── NoAccountsNotice.tsx   # блок «создайте счёт» (card / banner)
     │   ├── CategoryIcon.tsx, CategoryPicker.tsx, CreateCategorySheet.tsx
     │   ├── ItemCategorySheet.tsx
     │   ├── QrCameraScanner.tsx
-    │   ├── dashboard/           # sidebar desktop
-    │   ├── mobile/              # PeriodNavigator, TxRow, FAB...
+    │   ├── dashboard/           # sidebar desktop, CategoryProgress
+    │   ├── mobile/              # PeriodNavigator, TxRow, RefreshBar, Skeleton, FAB...
     │   └── ui/                  # Button, Card, Badge
     └── lib/
         ├── dates.ts             # периоды, timezone, parse/format
-        ├── categories.ts
+        ├── categories.ts        # дерево, display/color map, dotColor
         ├── category-icons.ts
-        ├── stats.ts
+        ├── stats.ts             # offline fallback, txRowFromList, colorMapFromStats
+        ├── cache-first.ts       # trackBackgroundFresh → RefreshBar
         ├── transactions.ts
         ├── connectivity.ts
         ├── data-events.ts
@@ -169,9 +173,14 @@ AuthProvider
 - APK/prod: **обязателен** `VITE_API_URL` при сборке
 - Суммы в **копейках**; UI: `formatMoney()`, формы: `rublesToKopecks()`
 
-Эндпоинты: `/v1/auth/*`, `/accounts`, `/categories`, `/transactions`, `/receipts/qr`
+Эндпоинты: `/v1/auth/*`, `/accounts`, `/categories`, `/transactions`, `/receipts/qr`, **`/stats`**
+
+Типы stats: `PeriodStats`, `CategoryStat` — `{ expense, income, categories[], recent_expenses[] }`
 
 ### data-service.ts — фасад (использовать в UI)
+
+Паттерн **cache-first**: сначала IndexedDB → при online фоновая revalidate (`fresh` promise).  
+Хелпер UI: `trackBackgroundFresh()` из `lib/cache-first.ts` → `RefreshBar`.
 
 | Функция | Online | Offline |
 |---------|--------|---------|
@@ -180,6 +189,7 @@ AuthProvider
 | `getCategories` | API → cache | cache |
 | `create/update/deleteCategory` | API | **ошибка** |
 | `getTransactions` | API → cache → merge | cache → merge |
+| **`getStats`** | API → cache | cache stats **или** `buildStatsFromTransactions` |
 | `createTransaction` | API | local tx + queue |
 | `deleteTransaction` | API | hide + queue |
 | `updateTransactionItem` | API | queue + patch cache |
@@ -187,7 +197,8 @@ AuthProvider
 | `prefetchCoreData` | warm cache | no-op |
 | `processSyncQueue` | replay queue | no-op offline |
 
-После мутаций: `notifyAccountsChanged()` / `notifyTransactionsChanged()`.
+После мутаций: `notifyAccountsChanged()` / `notifyTransactionsChanged()`.  
+Инвалидация `transactions:*` **и** `stats:*` — вместе (см. `invalidateAllTransactionsCache`).
 
 ---
 
@@ -211,7 +222,10 @@ DB: `finance_manager`, version 1
 - `accounts`
 - `categories`
 - `transactions:${JSON.stringify(params)}`
+- **`stats:${JSON.stringify(params)}`** — агрегаты главной (период + account_id)
 - `meta:tempIdMap` — маппинг `local_*` → server id
+
+При мутации транзакций сбрасываются **все** ключи `transactions:*` и `stats:*`.
 
 ### Queue (`lib/offline/queue.ts`)
 
@@ -248,10 +262,14 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 
 ### DashboardPage (`/`)
 
-- PeriodNavigator: day/week/month + стрелки назад/вперёд
-- Баланс (sum accounts), расходы/доходы за период
-- Top-5 категорий (`loadCategoryStats`)
-- Последние 8 трат за неделю
+- **Один запрос** `getStats(periodParams)` — не тянет полный `/transactions`
+- PeriodNavigator: day/week/month + стрелки
+- Баланс (sum accounts), расходы/доходы из `stats.expense` / `stats.income`
+- Категории: `stats.categories` (с бэка, по позициям чеков); preview **5** + «ещё N»
+- Последние траты: `stats.recent_expenses` (до 8, compact с бэка)
+- Offline: `buildStatsFromTransactions()` из кэша tx + categories
+- UX: `DashboardSkeleton`, `RefreshBar` при фоновой revalidate
+- Без счетов → `NoAccountsNotice`
 
 ### TransactionsPage (`/transactions`)
 
@@ -321,7 +339,16 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 
 ### categories.ts
 
-`getRootCategories`, `getSubcategories`, `buildCategoryDisplayMap`, ...
+`getRootCategories`, `getSubcategories`, `buildCategoryDisplayMap`, **`buildCategoryColorMap`**, **`resolveTransactionDotColor`**
+
+- **`qr_receipt`**: `dotColor = null` → белый маркер с обводкой (категория только у позиций)
+- manual: цвет из первой позиции / `tx.category`
+
+### stats.ts
+
+- **`buildStatsFromTransactions`** — offline fallback (агрегация по позициям чеков, как на бэке)
+- **`colorMapFromStats`**, **`txRowFromList`** — маппинг для TxRow на главной
+- **`loadCategoryStats`** — legacy/локальный расчёт из полного списка tx (не для главной online)
 
 ### CRUD
 
@@ -334,7 +361,7 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 
 **Чеки** используют только **системные** категории (бэкенд + LLM).
 
-Компоненты: `CategoryPicker`, `CreateCategorySheet`, `ItemCategorySheet`
+Компоненты: `CategoryPicker`, `CreateCategorySheet` (portal `z-[100]`, футер над bottom nav), `ItemCategorySheet`
 
 ---
 
@@ -344,7 +371,9 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 |------|------------|
 | `PeriodNavigator` | табы + ← label → |
 | `PeriodTabs` | День / Неделя / Месяц |
-| `TxRow` | строка операции |
+| `TxRow` | строка операции; prop **`dotColor`** (null = чек) |
+| `RefreshBar` | тонкая полоска сверху при фоновом refresh |
+| `Skeleton` | `DashboardSkeleton` и др. placeholder |
 | `PageHeader` | заголовок экрана |
 | `FabActionMenu` | FAB: Вручную / Чек |
 | `MenuRow` | пункт меню Settings |
@@ -387,11 +416,11 @@ npm run android:apk
 Скрипт `scripts/build-apk.sh`:
 1. JDK 17
 2. проверка `.env.production.local`
-3. `apply-android-icon.sh`
+3. `apply-android-icon.sh` → квадратные mipmap без растягивания
 4. `cap:sync` (build + sync)
 5. `gradlew assembleDebug`
 
-Иконка: `resources/checkly-icon-512.png` → mipmap через `sips`.
+Иконка: `resources/checkly-icon-512.png` → `scripts/generate_android_icons.py` (квадрат без растягивания, adaptive foreground).
 
 ### API URL по среде
 
@@ -420,11 +449,14 @@ Dev: `npm run dev` → `:5173`
 ### Делать
 
 - Читать/писать через **`data-service`**
+- **Главная**: `getStats`, не `getTransactions`
 - Суммы: **`rublesToKopecks` / `formatMoney`**
-- Фильтры транзакций: **`getPeriodRange` + `toApiDateTimeRange`**
-- Списки tx: подписка **`subscribeTransactionsChanged`**
-- Счета: **`useAccounts()`**
+- Фильтры: **`getPeriodRange` + `toApiDateTimeRange`**
+- Списки tx: подписка **`subscribeTransactionsChanged`** (главная перезагружает stats)
+- Цвета маркеров: **`resolveTransactionDotColor`** + color map
+- Счета: **`useAccounts()`**; пустой список → **`NoAccountsNotice`**
 - QR и CRUD категорий: проверять **`useSync().online`**
+- Фоновый refresh: **`trackBackgroundFresh`** + **`RefreshBar`**
 
 ### Не делать
 
@@ -467,6 +499,9 @@ UI action
 | Новая страница | `src/pages/` + `App.tsx` route |
 | API вызов из UI | `src/api/data-service.ts` |
 | HTTP/types | `src/api/client.ts` |
+| Статистика главной | `getStats`, `src/lib/stats.ts` |
+| Цвета категорий / dot | `src/lib/categories.ts` |
+| Cache-first UI | `src/lib/cache-first.ts`, `RefreshBar` |
 | Offline DB | `src/lib/offline/db.ts` |
 | Cache merge | `src/lib/offline/cache.ts` |
 | Sync | `src/lib/offline/sync.ts` |
@@ -474,6 +509,7 @@ UI action
 | Period UI | `src/components/mobile/PeriodNavigator.tsx` |
 | Auth | `src/context/AuthContext.tsx` |
 | Layout/nav | `src/components/Layout.tsx` |
+| Нет счетов | `src/components/NoAccountsNotice.tsx` |
 | APK | `scripts/build-apk.sh` |
 
 ---
