@@ -43,6 +43,26 @@ class CategoryRepository:
         )
         return self._db.scalar(stmt)
 
+    def find_visible_by_name(
+        self,
+        user_id: int,
+        name: str,
+        category_type: str,
+        parent_id: int | None,
+        *,
+        exclude_id: int | None = None,
+    ) -> Category | None:
+        """Системная или своя категория с тем же именем на том же уровне."""
+        stmt = select(Category).where(
+            or_(Category.user_id.is_(None), Category.user_id == user_id),
+            Category.name == name,
+            Category.type == category_type,
+            Category.parent_id == parent_id,
+        )
+        if exclude_id is not None:
+            stmt = stmt.where(Category.id != exclude_id)
+        return self._db.scalar(stmt)
+
     def list_ids_by_parent(self, parent_id: int) -> list[int]:
         return list(
             self._db.scalars(select(Category.id).where(Category.parent_id == parent_id)).all()

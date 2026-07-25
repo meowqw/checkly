@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.category_taxonomy import EXPENSE_TAXONOMY, normalize_expense_category
 from app.core.enums import CategoryType
-from app.core.exceptions import ForbiddenError, NotFoundError, ConflictError
+from app.core.exceptions import AppError, ConflictError, ForbiddenError, NotFoundError
 from app.core.uuid_utils import new_uid
 from app.database.models import Category
 from app.dto.categories import (
@@ -54,11 +54,14 @@ class CategoryService:
                 raise ConflictError("Тип категории должен совпадать с родительской")
             parent_id = parent.id
 
+        name = dto.name.strip()
+        self._ensure_unique_name(user_id, name, dto.type.value, parent_id)
+
         category = Category(
             uid=new_uid(),
             user_id=user_id,
             parent_id=parent_id,
-            name=dto.name,
+            name=name,
             type=dto.type.value,
             icon=dto.icon,
             color=dto.color,
@@ -73,7 +76,15 @@ class CategoryService:
     ) -> CategoryResponseDTO:
         category = self._get_user_owned_category(category_uid, user_id)
         if dto.name is not None:
-            category.name = dto.name
+            name = dto.name.strip()
+            self._ensure_unique_name(
+                user_id,
+                name,
+                category.type,
+                category.parent_id,
+                exclude_id=category.id,
+            )
+            category.name = name
         if dto.icon is not None:
             category.icon = dto.icon
         if dto.color is not None:
@@ -122,6 +133,27 @@ class CategoryService:
         if not category:
             raise ForbiddenError("Нельзя изменять системную или чужую категорию")
         return category
+
+    def _ensure_unique_name(
+        self,
+        user_id: int,
+        name: str,
+        category_type: str,
+        parent_id: int | None,
+        *,
+        exclude_id: int | None = None,
+    ) -> None:
+        if not name:
+            raise AppError("Название категории не может быть пустым")
+        existing = self._categories.find_visible_by_name(
+            user_id,
+            name,
+            category_type,
+            parent_id,
+            exclude_id=exclude_id,
+        )
+        if existing:
+            raise ConflictError("Категория с таким названием уже есть")
 
     def _to_tree_dto(self, category: Category, all_categories: list[Category]) -> CategoryDTO:
         children = [c for c in all_categories if c.parent_id == category.id]

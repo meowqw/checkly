@@ -3,7 +3,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.core.enums import CategoryType
-from app.core.exceptions import ForbiddenError
+from app.core.exceptions import ConflictError, ForbiddenError
 from app.database.models import Category, User
 from app.dto.categories import CreateCategoryRequestDTO, UpdateCategoryRequestDTO
 from app.services.category_service import CategoryService
@@ -50,6 +50,94 @@ def test_cannot_delete_system_category(
 ) -> None:
     with pytest.raises(ForbiddenError):
         CategoryService(db).delete_category(user.id, system_categories["products"].uid)
+
+
+def test_duplicate_root_category_raises_conflict(db: Session, user: User) -> None:
+    service = CategoryService(db)
+    service.create_category(
+        user.id,
+        CreateCategoryRequestDTO(name="Хобби", type=CategoryType.EXPENSE),
+    )
+    with pytest.raises(ConflictError, match="уже есть"):
+        service.create_category(
+            user.id,
+            CreateCategoryRequestDTO(name="Хобби", type=CategoryType.EXPENSE),
+        )
+
+
+def test_duplicate_subcategory_raises_conflict(
+    db: Session, user: User, system_categories: dict[str, Category]
+) -> None:
+    service = CategoryService(db)
+    parent_uid = system_categories["products"].uid
+    service.create_category(
+        user.id,
+        CreateCategoryRequestDTO(
+            name="Своя подкатегория",
+            type=CategoryType.EXPENSE,
+            parent_id=parent_uid,
+        ),
+    )
+    with pytest.raises(ConflictError, match="уже есть"):
+        service.create_category(
+            user.id,
+            CreateCategoryRequestDTO(
+                name="Своя подкатегория",
+                type=CategoryType.EXPENSE,
+                parent_id=parent_uid,
+            ),
+        )
+
+
+def test_cannot_create_category_with_system_name(
+    db: Session, user: User, system_categories: dict[str, Category]
+) -> None:
+    with pytest.raises(ConflictError, match="уже есть"):
+        CategoryService(db).create_category(
+            user.id,
+            CreateCategoryRequestDTO(name="Продукты", type=CategoryType.EXPENSE),
+        )
+
+
+def test_rename_to_duplicate_raises_conflict(db: Session, user: User) -> None:
+    service = CategoryService(db)
+    service.create_category(
+        user.id,
+        CreateCategoryRequestDTO(name="Альфа", type=CategoryType.EXPENSE),
+    )
+    beta = service.create_category(
+        user.id,
+        CreateCategoryRequestDTO(name="Бета", type=CategoryType.EXPENSE),
+    )
+    with pytest.raises(ConflictError, match="уже есть"):
+        service.update_category(
+            user.id,
+            beta.category.id,
+            UpdateCategoryRequestDTO(name="Альфа"),
+        )
+
+
+def test_same_name_under_different_parents_ok(
+    db: Session, user: User, system_categories: dict[str, Category]
+) -> None:
+    service = CategoryService(db)
+    service.create_category(
+        user.id,
+        CreateCategoryRequestDTO(
+            name="Общее",
+            type=CategoryType.EXPENSE,
+            parent_id=system_categories["products"].uid,
+        ),
+    )
+    created = service.create_category(
+        user.id,
+        CreateCategoryRequestDTO(
+            name="Общее",
+            type=CategoryType.EXPENSE,
+            parent_id=system_categories["other"].uid,
+        ),
+    )
+    assert created.category.name == "Общее"
 
 
 def test_find_system_for_receipt(

@@ -43,8 +43,15 @@ def list_categories(
     "",
     response_model=CategoryResponseDTO,
     summary="Создать категорию",
-    description="Создаёт пользовательскую категорию или подкатегорию.",
-    responses={**_AUTH_ERRORS, 400: COMMON_ERROR_RESPONSES[400]},
+    description=(
+        "Создаёт пользовательскую категорию или подкатегорию. "
+        "Имя должно быть уникально среди системных и своих на том же уровне."
+    ),
+    responses={
+        **_AUTH_ERRORS,
+        400: COMMON_ERROR_RESPONSES[400],
+        409: COMMON_ERROR_RESPONSES[409],
+    },
 )
 def create_category(
     dto: CreateCategoryRequestDTO, db: DbSession, user: CurrentUser
@@ -56,8 +63,15 @@ def create_category(
     "/{category_id}",
     response_model=CategoryResponseDTO,
     summary="Обновить категорию",
-    description="Можно менять название, иконку и цвет. Только пользовательские категории.",
-    responses={**_AUTH_ERRORS, 404: COMMON_ERROR_RESPONSES[404]},
+    description=(
+        "Можно менять название, иконку и цвет. Только пользовательские категории. "
+        "Новое имя не должно совпадать с уже существующим на том же уровне."
+    ),
+    responses={
+        **_AUTH_ERRORS,
+        404: COMMON_ERROR_RESPONSES[404],
+        409: COMMON_ERROR_RESPONSES[409],
+    },
 )
 def update_category(
     category_id: str,
