@@ -8,6 +8,7 @@ from app.core.enums import TransactionType
 from app.database.models import Category
 from app.dto.stats import CategoryStatDTO, StatsResponseDTO
 from app.dto.transactions import TransactionFilterDTO
+from app.repositories.category_repository import CategoryRepository
 from app.repositories.transaction_repository import TransactionRepository
 from app.services.transaction_mapper import map_transaction_to_list_item
 from app.services.transaction_queries import resolve_transaction_filters
@@ -19,16 +20,30 @@ FALLBACK_CATEGORY = "Прочее"
 class StatsService:
     def __init__(self, db: Session):
         self._transactions = TransactionRepository(db)
+        self._categories = CategoryRepository(db)
 
     def get_stats(self, filters: TransactionFilterDTO) -> StatsResponseDTO:
-        resolved = resolve_transaction_filters(self._transactions, filters)
-
-        sums = self._transactions.sum_amounts_by_type(
-            resolved.user_id,
-            from_date=resolved.from_date,
-            to_date=resolved.to_date,
-            account_id=resolved.account_id,
+        resolved = resolve_transaction_filters(
+            self._transactions, filters, categories=self._categories
         )
+        category_ids = resolved.category_ids
+
+        if category_ids is None:
+            sums = self._transactions.sum_amounts_by_type(
+                resolved.user_id,
+                from_date=resolved.from_date,
+                to_date=resolved.to_date,
+                account_id=resolved.account_id,
+            )
+        else:
+            sums = self._transactions.sum_item_amounts_by_type(
+                resolved.user_id,
+                category_ids=category_ids,
+                from_date=resolved.from_date,
+                to_date=resolved.to_date,
+                account_id=resolved.account_id,
+            )
+
         expense = sums.get(TransactionType.EXPENSE.value, 0)
         income = sums.get(TransactionType.INCOME.value, 0)
 
@@ -37,6 +52,7 @@ class StatsService:
             from_date=resolved.from_date,
             to_date=resolved.to_date,
             account_id=resolved.account_id,
+            category_ids=category_ids,
         )
 
         recent_rows = self._transactions.list_recent_expenses(
@@ -44,6 +60,7 @@ class StatsService:
             from_date=resolved.from_date,
             to_date=resolved.to_date,
             account_id=resolved.account_id,
+            category_ids=category_ids,
             limit=RECENT_EXPENSES_LIMIT,
         )
         recent = [map_transaction_to_list_item(t, compact=True) for t in recent_rows]
@@ -62,18 +79,20 @@ class StatsService:
         from_date: datetime | None,
         to_date: datetime | None,
         account_id: int | None,
+        category_ids: list[int] | None,
     ) -> list[CategoryStatDTO]:
         rows = self._transactions.aggregate_expense_category_amounts(
             user_id,
             from_date=from_date,
             to_date=to_date,
             account_id=account_id,
+            category_ids=category_ids,
         )
         if not rows:
             return []
 
-        category_ids = [cid for cid, _ in rows if cid is not None]
-        categories_by_id = self._transactions.get_categories_with_parents(category_ids)
+        known_ids = [cid for cid, _ in rows if cid is not None]
+        categories_by_id = self._transactions.get_categories_with_parents(known_ids)
 
         # Схлопываем по display-name (как раньше: ключ — имя, не id)
         totals: dict[str, tuple[int, str | None, str | None]] = {}

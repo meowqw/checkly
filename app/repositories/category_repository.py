@@ -43,6 +43,11 @@ class CategoryRepository:
         )
         return self._db.scalar(stmt)
 
+    def list_ids_by_parent(self, parent_id: int) -> list[int]:
+        return list(
+            self._db.scalars(select(Category.id).where(Category.parent_id == parent_id)).all()
+        )
+
     def create(self, category: Category) -> Category:
         self._db.add(category)
         self._db.flush()

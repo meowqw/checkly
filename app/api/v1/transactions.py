@@ -32,12 +32,14 @@ _AUTH_ERRORS = {401: COMMON_ERROR_RESPONSES[401]}
     summary="Список транзакций",
     description=(
         "Фильтрация по периоду (`from`, `to` — даты YYYY-MM-DD в часовом поясе клиента), "
-        "типу и счёту. В списке есть поля title, account, category (отображаемое имя).\n\n"
+        "типу, счёту и опционально категории.\n\n"
+        "`category_id`: корень — вся ветка (родитель + подкатегории); "
+        "подкатегория — операции с позицией в этой категории.\n\n"
         "Пагинация опциональна: без `limit` возвращается весь список (как раньше). "
         "С `limit`/`offset` в ответ добавляются `total`, `limit`, `offset`, `has_more` "
         f"(max limit = {TRANSACTIONS_MAX_LIMIT})."
     ),
-    responses=_AUTH_ERRORS,
+    responses={**_AUTH_ERRORS, 404: COMMON_ERROR_RESPONSES[404]},
 )
 def list_transactions(
     db: DbSession,
@@ -55,6 +57,13 @@ def list_transactions(
     ),
     type: TransactionType | None = Query(default=None, description="Фильтр: expense или income"),
     account_id: str | None = Query(default=None, description="UUID счёта"),
+    category_id: str | None = Query(
+        default=None,
+        description=(
+            "UUID категории. Родитель — вся ветка; дочерняя — только она "
+            "(по позиции чека / категории ручной операции)"
+        ),
+    ),
     limit: int | None = Query(
         default=None,
         ge=1,
@@ -69,6 +78,7 @@ def list_transactions(
         to_date=to_date,
         type=type,
         account_uid=account_id,
+        category_uid=category_id,
         timezone=tz,
         limit=limit,
         offset=offset,

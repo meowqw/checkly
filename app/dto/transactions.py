@@ -100,6 +100,7 @@ class TransactionFilterDTO(BaseModel):
     to_date: datetime | None = None
     type: TransactionType | None = None
     account_uid: str | None = None
+    category_uid: str | None = None
     timezone: str = "Europe/Moscow"
     limit: int | None = None
     offset: int = 0

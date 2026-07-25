@@ -222,7 +222,7 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 | Method | Path | Query / Body | Response |
 |--------|------|--------------|----------|
-| GET | `/` | `from`, `to`, `type`, `account_id`, **`limit?`**, **`offset?`** | `{transactions: [...]}` (+ meta при пагинации) |
+| GET | `/` | `from`, `to`, `type`, `account_id`, **`category_id?`**, **`limit?`**, **`offset?`** | `{transactions: [...]}` (+ meta при пагинации) |
 | POST | `/` | manual tx body | `{transaction}` |
 | GET | `/{id}` | — | `{transaction}` (detail) |
 | PATCH | `/{id}` | `{amount?, category_id?, comment?}` | `{transaction}` — **только manual** |
@@ -242,6 +242,12 @@ HTTP → api/v1/*.py (тонкий контроллер)
 }
 ```
 - Константа max: `TRANSACTIONS_MAX_LIMIT = 100` в `transaction_service.py`
+
+**Фильтр `category_id` (как у `/stats`):**
+- корень → операции с позицией в родителе или любой подкатегории;
+- подкатегория → только с позицией в ней;
+- ручная операция попадает, если её item.category в scope;
+- QR-чек попадает, если **хотя бы одна** позиция в scope (в ответе items чека по-прежнему все).
 
 **Create manual:**
 ```json
@@ -281,7 +287,7 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
-| GET | `/` | `from`, `to`, `account_id` | см. ниже |
+| GET | `/` | `from`, `to`, `account_id`, **`category_id?`** | см. ниже |
 
 ```json
 {
@@ -295,17 +301,18 @@ HTTP → api/v1/*.py (тонкий контроллер)
 ```
 
 **Правила агрегации (`StatsService`):**
-- `expense` / `income` — `SUM(transaction.amount)` по типу (SQL)
+- Без `category_id`: `expense` / `income` — `SUM(transaction.amount)` по типу (SQL)
+- С `category_id`: суммы по **позициям** (`transaction_items`) в scope категорий; корень = родитель + все дети, подкатегория = только она
 - `categories` — **только расходы**; для чеков суммируются **позиции** (`transaction_items.amount`), не сумма чека целиком (SQL GROUP BY + display-name в Python)
-- транзакции **без позиций** → сумма tx в категорию «Прочее»
-- `percent` — доля от суммы категорийных расходов за период
+- транзакции **без позиций** → сумма tx в «Прочее» (**только** без фильтра `category_id`)
+- `percent` — доля от суммы категорийных расходов в текущей выборке
 - `color` — из категории; у подкатегорий наследуется `parent.color`
-- `recent_expenses` — отдельные `LIMIT 8` расходов (`occurred_at DESC`); `compact=True`
+- `recent_expenses` — `LIMIT 8` расходов; при фильтре — только tx с позицией в scope; `compact=True`
 
-Query **`type` нет** — stats всегда считает и расходы, и доходы.
+Query **`type` нет** — stats всегда считает и расходы, и доходы (в рамках фильтра категорий).
 
-Реализация: **не** грузит все tx в Python. Три запроса в repo:
-`sum_amounts_by_type`, `aggregate_expense_category_amounts`, `list_recent_expenses`.
+Реализация: SQL в repo —
+`sum_amounts_by_type` / `sum_item_amounts_by_type`, `aggregate_expense_category_amounts`, `list_recent_expenses`.
 
 Файлы: `app/api/v1/stats.py`, `app/services/stats_service.py`, `app/dto/stats.py`, `app/repositories/transaction_repository.py`, `app/services/transaction_queries.py`
 

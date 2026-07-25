@@ -86,7 +86,9 @@ class TransactionService:
     def list_transactions(self, filters: TransactionFilterDTO) -> TransactionsListResponseDTO:
         # Без limit — прежнее поведение: весь список по фильтру (фронт не ломаем)
         if filters.limit is None:
-            rows = list_transactions_for_filters(self._transactions, filters)
+            rows = list_transactions_for_filters(
+                self._transactions, filters, categories=self._categories
+            )
             return TransactionsListResponseDTO(
                 transactions=[map_transaction_to_list_item(t) for t in rows]
             )
@@ -95,15 +97,20 @@ class TransactionService:
         offset = max(filters.offset, 0)
         paginated = filters.model_copy(update={"limit": limit, "offset": offset})
 
-        resolved = resolve_transaction_filters(self._transactions, paginated)
+        resolved = resolve_transaction_filters(
+            self._transactions, paginated, categories=self._categories
+        )
         total = self._transactions.count_for_user(
             resolved.user_id,
             from_date=resolved.from_date,
             to_date=resolved.to_date,
             transaction_type=resolved.transaction_type,
             account_id=resolved.account_id,
+            category_ids=resolved.category_ids,
         )
-        rows = list_transactions_for_filters(self._transactions, paginated)
+        rows = list_transactions_for_filters(
+            self._transactions, paginated, categories=self._categories
+        )
         return TransactionsListResponseDTO(
             transactions=[map_transaction_to_list_item(t) for t in rows],
             total=total,

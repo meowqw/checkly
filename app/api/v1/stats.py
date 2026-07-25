@@ -20,7 +20,9 @@ _AUTH_ERRORS = {401: COMMON_ERROR_RESPONSES[401]}
     summary="Статистика за период",
     description=(
         "Суммы доходов и расходов, разбивка расходов по категориям "
-        "(для чеков — по позициям) и последние 8 расходов."
+        "(для чеков — по позициям) и последние 8 расходов.\n\n"
+        "Опционально `category_id`: корень — вся ветка (родитель + подкатегории), "
+        "подкатегория — только она. Без параметра — как раньше, весь период."
     ),
     responses={**_AUTH_ERRORS, 404: COMMON_ERROR_RESPONSES[404]},
 )
@@ -39,12 +41,20 @@ def get_stats(
         description="Конец периода (YYYY-MM-DD), включительно",
     ),
     account_id: str | None = Query(default=None, description="UUID счёта"),
+    category_id: str | None = Query(
+        default=None,
+        description=(
+            "UUID категории. Родитель — фильтр по всей ветке; "
+            "дочерняя — только эта подкатегория"
+        ),
+    ),
 ) -> StatsResponseDTO:
     filters = TransactionFilterDTO(
         user_id=user.id,
         from_date=from_date,
         to_date=to_date,
         account_uid=account_id,
+        category_uid=category_id,
         timezone=tz,
     )
     return StatsService(db).get_stats(filters)

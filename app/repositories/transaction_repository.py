@@ -33,6 +33,7 @@ class TransactionRepository:
         to_date: datetime | None = None,
         transaction_type: str | None = None,
         account_id: int | None = None,
+        category_ids: list[int] | None = None,
         *,
         limit: int | None = None,
         offset: int = 0,
@@ -45,6 +46,14 @@ class TransactionRepository:
             transaction_type=transaction_type,
             account_id=account_id,
         )
+        if category_ids is not None:
+            has_matching_item = exists(
+                select(TransactionItem.id).where(
+                    TransactionItem.transaction_id == Transaction.id,
+                    TransactionItem.category_id.in_(category_ids),
+                )
+            )
+            stmt = stmt.where(has_matching_item)
         stmt = (
             stmt.options(
                 selectinload(Transaction.account),
@@ -68,6 +77,7 @@ class TransactionRepository:
         to_date: datetime | None = None,
         transaction_type: str | None = None,
         account_id: int | None = None,
+        category_ids: list[int] | None = None,
     ) -> int:
         stmt = (
             select(func.count())
@@ -81,6 +91,14 @@ class TransactionRepository:
             transaction_type=transaction_type,
             account_id=account_id,
         )
+        if category_ids is not None:
+            has_matching_item = exists(
+                select(TransactionItem.id).where(
+                    TransactionItem.transaction_id == Transaction.id,
+                    TransactionItem.category_id.in_(category_ids),
+                )
+            )
+            stmt = stmt.where(has_matching_item)
         return int(self._db.scalar(stmt) or 0)
 
     def list_recent_expenses(
@@ -90,6 +108,7 @@ class TransactionRepository:
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         account_id: int | None = None,
+        category_ids: list[int] | None = None,
         limit: int = 8,
     ) -> list[Transaction]:
         stmt = select(Transaction).where(
@@ -102,6 +121,14 @@ class TransactionRepository:
             to_date=to_date,
             account_id=account_id,
         )
+        if category_ids is not None:
+            has_matching_item = exists(
+                select(TransactionItem.id).where(
+                    TransactionItem.transaction_id == Transaction.id,
+                    TransactionItem.category_id.in_(category_ids),
+                )
+            )
+            stmt = stmt.where(has_matching_item)
         stmt = (
             stmt.options(
                 selectinload(Transaction.account),
@@ -136,6 +163,36 @@ class TransactionRepository:
         stmt = stmt.group_by(Transaction.type)
         return {row[0]: int(row[1]) for row in self._db.execute(stmt).all()}
 
+    def sum_item_amounts_by_type(
+        self,
+        user_id: int,
+        *,
+        category_ids: list[int],
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        account_id: int | None = None,
+    ) -> dict[str, int]:
+        """Суммы по типу транзакции, но только позиции с category_id ∈ scope."""
+        if not category_ids:
+            return {}
+        stmt = (
+            select(Transaction.type, func.coalesce(func.sum(TransactionItem.amount), 0))
+            .join(Transaction, Transaction.id == TransactionItem.transaction_id)
+            .where(
+                Transaction.user_id == user_id,
+                TransactionItem.category_id.in_(category_ids),
+            )
+        )
+        stmt = self._apply_filters(
+            stmt,
+            from_date=from_date,
+            to_date=to_date,
+            account_id=account_id,
+            model=Transaction,
+        )
+        stmt = stmt.group_by(Transaction.type)
+        return {row[0]: int(row[1]) for row in self._db.execute(stmt).all()}
+
     def aggregate_expense_category_amounts(
         self,
         user_id: int,
@@ -143,12 +200,13 @@ class TransactionRepository:
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         account_id: int | None = None,
+        category_ids: list[int] | None = None,
     ) -> list[tuple[int | None, int]]:
         """Суммы расходов по category_id (None = «Прочее»).
 
         Правила как в StatsService:
         - есть позиции → суммируем item.amount по category_id позиции;
-        - нет позиций → весь transaction.amount в «Прочее».
+        - нет позиций → весь transaction.amount в «Прочее» (только без фильтра категорий).
         """
         totals: dict[int | None, int] = {}
 
@@ -163,6 +221,8 @@ class TransactionRepository:
                 Transaction.type == TransactionType.EXPENSE.value,
             )
         )
+        if category_ids is not None:
+            items_stmt = items_stmt.where(TransactionItem.category_id.in_(category_ids))
         items_stmt = self._apply_filters(
             items_stmt,
             from_date=from_date,
@@ -174,26 +234,30 @@ class TransactionRepository:
         for category_id, amount in self._db.execute(items_stmt).all():
             totals[category_id] = totals.get(category_id, 0) + int(amount)
 
-        has_items = exists(
-            select(TransactionItem.id).where(TransactionItem.transaction_id == Transaction.id)
-        )
-        orphan_stmt = (
-            select(func.coalesce(func.sum(Transaction.amount), 0))
-            .where(
-                Transaction.user_id == user_id,
-                Transaction.type == TransactionType.EXPENSE.value,
-                ~has_items,
+        # «Прочее» без позиций — только в полном stats (без category filter)
+        if category_ids is None:
+            has_items = exists(
+                select(TransactionItem.id).where(
+                    TransactionItem.transaction_id == Transaction.id
+                )
             )
-        )
-        orphan_stmt = self._apply_filters(
-            orphan_stmt,
-            from_date=from_date,
-            to_date=to_date,
-            account_id=account_id,
-        )
-        orphan_amount = int(self._db.scalar(orphan_stmt) or 0)
-        if orphan_amount:
-            totals[None] = totals.get(None, 0) + orphan_amount
+            orphan_stmt = (
+                select(func.coalesce(func.sum(Transaction.amount), 0))
+                .where(
+                    Transaction.user_id == user_id,
+                    Transaction.type == TransactionType.EXPENSE.value,
+                    ~has_items,
+                )
+            )
+            orphan_stmt = self._apply_filters(
+                orphan_stmt,
+                from_date=from_date,
+                to_date=to_date,
+                account_id=account_id,
+            )
+            orphan_amount = int(self._db.scalar(orphan_stmt) or 0)
+            if orphan_amount:
+                totals[None] = totals.get(None, 0) + orphan_amount
 
         return list(totals.items())
 
