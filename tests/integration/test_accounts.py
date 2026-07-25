@@ -3,6 +3,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.core.enums import AccountMemberRole
 from app.core.uuid_utils import new_uid
 from app.database.models import Account, User, UserAccount
 from app.dto.accounts import CreateAccountRequestDTO, UpdateAccountRequestDTO
@@ -48,7 +49,13 @@ def test_account_not_found_for_other_user(
     alien = Account(uid=new_uid(), name="Чужой", balance=0)
     db.add(alien)
     db.flush()
-    db.add(UserAccount(user_id=other_user.id, account_id=alien.id))
+    db.add(
+        UserAccount(
+            user_id=other_user.id,
+            account_id=alien.id,
+            role=AccountMemberRole.OWNER.value,
+        )
+    )
     db.commit()
 
     resp = client.get(f"/v1/accounts", headers=auth_headers)

@@ -4,6 +4,7 @@ from typing import Any
 
 from sqlalchemy import exists, func, select
 from sqlalchemy.orm import Session, selectinload
+from sqlalchemy.sql import ColumnElement
 
 from app.core.enums import TransactionType
 from app.database.models import Account, Category, Transaction, TransactionItem, UserAccount
@@ -12,6 +13,13 @@ from app.database.models import Account, Category, Transaction, TransactionItem,
 class TransactionRepository:
     def __init__(self, db: Session):
         self._db = db
+
+    @staticmethod
+    def _accessible_account_ids(user_id: int) -> ColumnElement[bool]:
+        """Доступ ко всем транзакциям на счетах пользователя (включая общие)."""
+        return Transaction.account_id.in_(
+            select(UserAccount.account_id).where(UserAccount.user_id == user_id)
+        )
 
     def get_by_uid_for_user(self, uid: str, user_id: int) -> Transaction | None:
         return self._db.scalar(
@@ -23,7 +31,7 @@ class TransactionRepository:
                 ),
                 selectinload(Transaction.items).selectinload(TransactionItem.product),
             )
-            .where(Transaction.uid == uid, Transaction.user_id == user_id)
+            .where(Transaction.uid == uid, self._accessible_account_ids(user_id))
         )
 
     def list_for_user(
@@ -38,7 +46,7 @@ class TransactionRepository:
         limit: int | None = None,
         offset: int = 0,
     ) -> list[Transaction]:
-        stmt = select(Transaction).where(Transaction.user_id == user_id)
+        stmt = select(Transaction).where(self._accessible_account_ids(user_id))
         stmt = self._apply_filters(
             stmt,
             from_date=from_date,
@@ -82,7 +90,7 @@ class TransactionRepository:
         stmt = (
             select(func.count())
             .select_from(Transaction)
-            .where(Transaction.user_id == user_id)
+            .where(self._accessible_account_ids(user_id))
         )
         stmt = self._apply_filters(
             stmt,
@@ -112,7 +120,7 @@ class TransactionRepository:
         limit: int = 8,
     ) -> list[Transaction]:
         stmt = select(Transaction).where(
-            Transaction.user_id == user_id,
+            self._accessible_account_ids(user_id),
             Transaction.type == TransactionType.EXPENSE.value,
         )
         stmt = self._apply_filters(
@@ -152,7 +160,7 @@ class TransactionRepository:
     ) -> dict[str, int]:
         stmt = (
             select(Transaction.type, func.coalesce(func.sum(Transaction.amount), 0))
-            .where(Transaction.user_id == user_id)
+            .where(self._accessible_account_ids(user_id))
         )
         stmt = self._apply_filters(
             stmt,
@@ -179,7 +187,7 @@ class TransactionRepository:
             select(Transaction.type, func.coalesce(func.sum(TransactionItem.amount), 0))
             .join(Transaction, Transaction.id == TransactionItem.transaction_id)
             .where(
-                Transaction.user_id == user_id,
+                self._accessible_account_ids(user_id),
                 TransactionItem.category_id.in_(category_ids),
             )
         )
@@ -217,7 +225,7 @@ class TransactionRepository:
             )
             .join(Transaction, Transaction.id == TransactionItem.transaction_id)
             .where(
-                Transaction.user_id == user_id,
+                self._accessible_account_ids(user_id),
                 Transaction.type == TransactionType.EXPENSE.value,
             )
         )
@@ -244,7 +252,7 @@ class TransactionRepository:
             orphan_stmt = (
                 select(func.coalesce(func.sum(Transaction.amount), 0))
                 .where(
-                    Transaction.user_id == user_id,
+                    self._accessible_account_ids(user_id),
                     Transaction.type == TransactionType.EXPENSE.value,
                     ~has_items,
                 )
@@ -284,7 +292,7 @@ class TransactionRepository:
             .where(
                 TransactionItem.uid == item_uid,
                 Transaction.uid == transaction_uid,
-                Transaction.user_id == user_id,
+                self._accessible_account_ids(user_id),
             )
         )
 

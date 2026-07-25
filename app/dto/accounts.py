@@ -2,10 +2,19 @@
 from pydantic import BaseModel, Field
 
 
+class AccountMemberDTO(BaseModel):
+    id: str = Field(description="UUID пользователя")
+    login: str = Field(description="Логин")
+    role: str = Field(description="Роль на счёте: owner | member")
+
+
 class AccountDTO(BaseModel):
     id: str = Field(description="UUID счёта")
     name: str = Field(description="Название счёта")
     balance: int = Field(description="Баланс в копейках")
+    members: list[AccountMemberDTO] = Field(
+        default_factory=list, description="Участники счёта"
+    )
 
 
 class AccountsListResponseDTO(BaseModel):
@@ -24,6 +33,14 @@ class UpdateAccountRequestDTO(BaseModel):
 
 class AccountResponseDTO(BaseModel):
     account: AccountDTO = Field(description="Счёт")
+
+
+class CreateAccountInviteResponseDTO(BaseModel):
+    token: str = Field(description="Одноразовый токен приглашения")
+
+
+class JoinAccountRequestDTO(BaseModel):
+    token: str = Field(min_length=1, max_length=36, description="Токен приглашения")
 
 
 class SuccessResponseDTO(BaseModel):

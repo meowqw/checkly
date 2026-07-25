@@ -237,7 +237,7 @@ def _seed_user(
         acc = Account(uid=new_uid(), name=name, balance=balance)
         db.add(acc)
         db.flush()
-        db.add(UserAccount(user_id=user.id, account_id=acc.id))
+        db.add(UserAccount(user_id=user.id, account_id=acc.id, role="owner"))
         accounts.append(acc)
 
     # Пользовательская категория (только для demo)

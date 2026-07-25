@@ -29,3 +29,10 @@ class Currency(str, enum.Enum):
     """Валюта."""
 
     RUB = "RUB"  # рубль
+
+
+class AccountMemberRole(str, enum.Enum):
+    """Роль пользователя на счёте."""
+
+    OWNER = "owner"
+    MEMBER = "member"

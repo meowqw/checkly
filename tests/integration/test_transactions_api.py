@@ -72,7 +72,7 @@ def test_cannot_access_other_user_transaction(
     other_acc = Account(uid=new_uid(), name="Other", balance=0)
     db.add(other_acc)
     db.flush()
-    db.add(UserAccount(user_id=other_user.id, account_id=other_acc.id))
+    db.add(UserAccount(user_id=other_user.id, account_id=other_acc.id, role="owner"))
     db.commit()
 
     tx = make_manual_tx(

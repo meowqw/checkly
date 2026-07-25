@@ -26,7 +26,7 @@ REST API учёта личных финансов.
 
 OPENAPI_TAGS = [
     {"name": "auth", "description": "Регистрация и вход"},
-    {"name": "accounts", "description": "Счета пользователя"},
+    {"name": "accounts", "description": "Счета пользователя и семейный доступ"},
     {"name": "categories", "description": "Категории доходов и расходов"},
     {"name": "transactions", "description": "Транзакции"},
     {"name": "receipts", "description": "Импорт чеков по QR-коду"},

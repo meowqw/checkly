@@ -10,7 +10,13 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from app.core.enums import CategoryType, Currency, TransactionSource, TransactionType
+from app.core.enums import (
+    AccountMemberRole,
+    CategoryType,
+    Currency,
+    TransactionSource,
+    TransactionType,
+)
 from app.core.security import hash_password
 from app.core.uuid_utils import new_uid
 from app.database import get_db
@@ -109,7 +115,13 @@ def account(db: Session, user: User) -> Account:
     acc = Account(uid=new_uid(), name="Карта", balance=100_000_00)
     db.add(acc)
     db.flush()
-    db.add(UserAccount(user_id=user.id, account_id=acc.id))
+    db.add(
+        UserAccount(
+            user_id=user.id,
+            account_id=acc.id,
+            role=AccountMemberRole.OWNER.value,
+        )
+    )
     db.commit()
     db.refresh(acc)
     return acc
@@ -250,6 +262,18 @@ def auth_headers(user: User) -> dict[str, str]:
     from app.core.security import create_access_token
 
     token = create_access_token(user.uid)
+    return {
+        "Authorization": f"Bearer {token}",
+        "X-Timezone": "Europe/Moscow",
+        "Content-Type": "application/json",
+    }
+
+
+@pytest.fixture()
+def other_auth_headers(other_user: User) -> dict[str, str]:
+    from app.core.security import create_access_token
+
+    token = create_access_token(other_user.uid)
     return {
         "Authorization": f"Bearer {token}",
         "X-Timezone": "Europe/Moscow",

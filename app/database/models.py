@@ -68,6 +68,32 @@ class UserAccount(Base):
     account_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("accounts.id", ondelete="CASCADE"), primary_key=True
     )
+    role: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="owner", server_default="owner"
+    )
+
+
+class AccountInvite(Base, TimestampMixin):
+    """Одноразовый инвайт на совместный доступ к счёту."""
+
+    __tablename__ = "account_invites"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    uid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
+    account_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_by_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    used_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    account: Mapped["Account"] = relationship("Account")
+    created_by: Mapped["User"] = relationship("User", foreign_keys=[created_by_user_id])
+    used_by: Mapped["User | None"] = relationship("User", foreign_keys=[used_by_user_id])
 
 
 class Category(Base, TimestampMixin):

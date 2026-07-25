@@ -31,7 +31,7 @@ def test_stats_account_filter(
     other = Account(uid=new_uid(), name="Другой", balance=0)
     db.add(other)
     db.flush()
-    db.add(UserAccount(user_id=user.id, account_id=other.id))
+    db.add(UserAccount(user_id=user.id, account_id=other.id, role="owner"))
     db.commit()
     db.refresh(other)
 

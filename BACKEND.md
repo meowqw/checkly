@@ -125,7 +125,7 @@ finance_manager/
 │       ├── __init__.py         # engine, SessionLocal, get_db
 │       └── models.py
 ├── alembic/
-│   └── versions/               # 001–004
+│   └── versions/               # 001–005
 ├── scripts/
 │   ├── seed_categories.py
 │   ├── seed_demo_data.py       # тестовые пользователи/tx/чеки
@@ -192,14 +192,25 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 | Method | Path | Body | Response |
 |--------|------|------|----------|
-| GET | `/` | — | `{accounts: [{id, name, balance}]}` |
+| GET | `/` | — | `{accounts: [{id, name, balance, members}]}` |
 | POST | `/` | `{name, balance?}` | `{account}` |
-| PATCH | `/{account_id}` | `{name?, balance?}` | `{account}` |
-| DELETE | `/{account_id}` | — | `{success: true}` |
+| POST | `/join` | `{token}` | `{account}` — принять одноразовое приглашение |
+| POST | `/{account_id}/invites` | — | `{token}` — только **owner** |
+| PATCH | `/{account_id}` | `{name?, balance?}` | `{account}` — только **owner** |
+| DELETE | `/{account_id}` | — | `{success: true}` — только **owner** |
 
-Счёт привязан к пользователю через `user_accounts` (M:N).
+`members`: `[{id, login, role}]`, где `role` = `owner` | `member`.
 
-Файлы: `app/api/v1/accounts.py`, `app/services/account_service.py`
+**Семейный доступ:**
+- владелец генерирует одноразовый `token` (`POST .../invites`) и передаёт другому пользователю;
+- тот вызывает `POST /join` → запись в `user_accounts` с `role=member`;
+- повторное использование токена → 404; повторный join уже участником → 409;
+- участник видит все транзакции/stats по общему счёту и может создавать/править/удалять операции;
+- удаление счёта, PATCH и генерация инвайтов — только `owner`.
+
+Счёт привязан к пользователям через `user_accounts` (M:N + role).
+
+Файлы: `app/api/v1/accounts.py`, `app/services/account_service.py`, `app/dto/accounts.py`
 
 ### 4.3 Categories — `/v1/categories`
 
@@ -328,7 +339,8 @@ Query **`type` нет** — stats всегда считает и расходы,
 |---------|------------|
 | `users` | uid, email, login, password, **timezone** |
 | `accounts` | uid, name, balance (копейки) |
-| `user_accounts` | связь user ↔ account |
+| `user_accounts` | связь user ↔ account + **role** (`owner` / `member`) |
+| `account_invites` | одноразовые токены приглашения на счёт |
 | `categories` | дерево; user_id NULL = системная |
 | `merchants` | глобальные (inn, name, address) |
 | `products` | глобальный каталог товаров |
@@ -340,7 +352,9 @@ Query **`type` нет** — stats всегда считает и расходы,
 
 Индекс: `ix_transactions_user_occurred (user_id, occurred_at)` — миграция 003.
 
-Enums: `app/core/enums.py` — `TransactionType`, `TransactionSource`, `CategoryType`, `Currency`.
+Enums: `app/core/enums.py` — `TransactionType`, `TransactionSource`, `CategoryType`, `Currency`, `AccountMemberRole`.
+
+**Доступ к транзакциям:** фильтр по счетам из `user_accounts` (не по `transaction.user_id`), чтобы участники общего счёта видели все операции.
 
 ---
 
@@ -352,6 +366,7 @@ Enums: `app/core/enums.py` — `TransactionType`, `TransactionSource`, `Category
 | 002 | `002_user_product_category_overrides.py` | overrides |
 | 003 | `003_performance_indexes.py` | индекс транзакций |
 | 004 | `004_user_timezone.py` | `users.timezone` |
+| 005 | `005_account_sharing.py` | `user_accounts.role`, `account_invites` |
 
 ```bash
 docker compose exec app alembic upgrade head
@@ -502,6 +517,7 @@ Prompt включает дерево категорий из `build_taxonomy_pro
 
 - фильтры `from`/`to` через `normalize_range_start/end` + timezone
 - `account_id` → internal id через user_accounts
+- доступ: транзакции по **доступным счетам** (`user_accounts`), не только `transaction.user_id == current`
 - sort: `occurred_at DESC`
 - eager load: account, merchant, items→category→parent
 
@@ -600,7 +616,7 @@ docker compose exec app pytest tests/ -q
 | Каталог | Что |
 |---------|-----|
 | `tests/unit/` | dates, security/JWT, category_display, taxonomy, transaction_mapper |
-| `tests/integration/` | auth, accounts, balance, QR (моки), stats, list/pagination, categories, product matching |
+| `tests/integration/` | auth, accounts, **account sharing**, balance, QR (моки), stats, list/pagination, categories, product matching |
 | `tests/helpers.py` | `FakeReceiptProvider`, `FakeProductNormalizer` |
 | `tests/conftest.py` | SQLite in-memory (`StaticPool`), BigInteger→Integer для AUTOINCREMENT |
 
@@ -671,6 +687,8 @@ Handlers в `main.py`: `AppError`, `IntegrityError` → 409, generic → 500.
 ```http
 POST /v1/auth/register
 POST /v1/accounts          {"name":"Карта","balance":0}
+POST /v1/accounts/{id}/invites
+POST /v1/accounts/join     {"token":"..."}
 POST /v1/transactions      {manual expense}
 POST /v1/receipts/qr       {"account_id":"...","qr":"t=...&s=..."}
 GET  /v1/stats?from=2026-06-01&to=2026-06-30
