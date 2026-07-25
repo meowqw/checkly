@@ -125,7 +125,7 @@ finance_manager/
 │       ├── __init__.py         # engine, SessionLocal, get_db
 │       └── models.py
 ├── alembic/
-│   └── versions/               # 001–005
+│   └── versions/               # 001–006
 ├── scripts/
 │   ├── seed_categories.py
 │   ├── seed_demo_data.py       # тестовые пользователи/tx/чеки
@@ -292,6 +292,10 @@ HTTP → api/v1/*.py (тонкий контроллер)
 |--------|------|------|----------|
 | POST | `/qr` | `{account_id, qr}` | `{transaction}` (detail) |
 
+Повторный импорт того же чека → **409** `{"error": "Этот чек уже добавлен"}`:
+- то же значение `qr`, или
+- те же фискальные реквизиты (ФН + ФД + ФП), даже если строка QR отличается.
+
 Файл: `app/api/v1/receipts.py`
 
 ### 4.6 Stats — `/v1/stats`
@@ -347,7 +351,7 @@ Query **`type` нет** — stats всегда считает и расходы,
 | `product_aliases` | raw_name + merchant → product |
 | `transactions` | операция |
 | `transaction_items` | позиция чека / ручная строка |
-| `receipts` | фискальные поля, raw_qr, raw_json; 1:1 с transaction |
+| `receipts` | фискальные поля, raw_qr, raw_json; 1:1 с transaction; unique (ФН, ФД, ФП) |
 | `user_product_category_overrides` | персональная категория для product_id |
 
 Индекс: `ix_transactions_user_occurred (user_id, occurred_at)` — миграция 003.
@@ -367,6 +371,7 @@ Enums: `app/core/enums.py` — `TransactionType`, `TransactionSource`, `Category
 | 003 | `003_performance_indexes.py` | индекс транзакций |
 | 004 | `004_user_timezone.py` | `users.timezone` |
 | 005 | `005_account_sharing.py` | `user_accounts.role`, `account_invites` |
+| 006 | `006_receipt_fiscal_unique.py` | unique (ФН, ФД, ФП) на `receipts` |
 
 ```bash
 docker compose exec app alembic upgrade head
@@ -447,17 +452,19 @@ python scripts/seed_categories.py
 ```
 POST /v1/receipts/qr
   → TransactionService.create_transaction_from_receipt()
-    1. ProverkachekaReceiptProvider.get_receipt_by_qr(qr)
-    2. Merchant (по INN)
-    3. Transaction (expense, qr_receipt, amount=total)
-    4. Receipt (фискальные поля + raw)
-    5. Для каждой позиции:
+    1. Если raw_qr уже есть → 409 «Этот чек уже добавлен»
+    2. ProverkachekaReceiptProvider.get_receipt_by_qr(qr)
+    3. Если ФН+ФД+ФП уже есть → 409 «Этот чек уже добавлен»
+    4. Merchant (по INN)
+    5. Transaction (expense, qr_receipt, amount=total)
+    6. Receipt (фискальные поля + raw)
+    7. Для каждой позиции:
        - ProductMatchingService.find_existing_product()
        - known → TransactionItem + user override category
        - unknown → batch LLM normalize
-    6. LLM → find_system_for_receipt → Product + Alias + TransactionItem
-    7. adjust_account_balance (-amount)
-    8. commit
+    8. LLM → find_system_for_receipt → Product + Alias + TransactionItem
+    9. adjust_account_balance (-amount)
+    10. commit
 ```
 
 ### Proverkacheka

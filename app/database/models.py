@@ -258,6 +258,14 @@ class UserProductCategoryOverride(Base, TimestampMixin):
 
 class Receipt(Base, TimestampMixin):
     __tablename__ = "receipts"
+    __table_args__ = (
+        UniqueConstraint(
+            "fiscal_drive_number",
+            "fiscal_document_number",
+            "fiscal_sign",
+            name="uq_receipts_fiscal",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     uid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)

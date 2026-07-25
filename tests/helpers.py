@@ -61,6 +61,9 @@ def default_receipt_output(
     *,
     total_sum: int = 500_00,
     items: list[ReceiptItemDTO] | None = None,
+    fiscal_drive_number: str = "9999000001",
+    fiscal_document_number: str = "12345",
+    fiscal_sign: str = "987654321",
 ) -> ReceiptProviderOutputDTO:
     if items is None:
         items = [
@@ -87,9 +90,9 @@ def default_receipt_output(
             address="Москва",
         ),
         receipt=ReceiptMetaDTO(
-            fiscal_drive_number="9999000001",
-            fiscal_document_number="12345",
-            fiscal_sign="987654321",
+            fiscal_drive_number=fiscal_drive_number,
+            fiscal_document_number=fiscal_document_number,
+            fiscal_sign=fiscal_sign,
             operation_type=1,
             receipt_datetime=datetime(2026, 6, 10, 15, 30, 0),
             total_sum=total_sum,

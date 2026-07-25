@@ -18,12 +18,14 @@ _AUTH_ERRORS = {401: COMMON_ERROR_RESPONSES[401]}
     summary="Сканировать QR чека",
     description=(
         "Загружает чек через proverkacheka.ru, нормализует товары (AI), "
-        "создаёт транзакцию-расход и списывает сумму со счёта."
+        "создаёт транзакцию-расход и списывает сумму со счёта. "
+        "Повторный импорт того же чека (по QR или фискальным реквизитам) — 409."
     ),
     responses={
         **_AUTH_ERRORS,
         400: COMMON_ERROR_RESPONSES[400],
         404: COMMON_ERROR_RESPONSES[404],
+        409: COMMON_ERROR_RESPONSES[409],
         502: {"description": "Ошибка внешнего сервиса проверки чека"},
     },
 )

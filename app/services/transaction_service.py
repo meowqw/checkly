@@ -6,7 +6,12 @@ from sqlalchemy.orm import Session
 
 from app.core.dates import now_local, to_storage_datetime
 from app.core.enums import Currency, TransactionSource, TransactionType
-from app.core.exceptions import ExternalServiceError, ForbiddenError, NotFoundError
+from app.core.exceptions import (
+    ConflictError,
+    ExternalServiceError,
+    ForbiddenError,
+    NotFoundError,
+)
 from app.core.uuid_utils import new_uid
 from app.database.models import (
     Account,
@@ -24,6 +29,7 @@ from app.dto.receipts import (
     NormalizerInputItemDTO,
     ProductNormalizerInputDTO,
     ReceiptItemDTO,
+    ReceiptMetaDTO,
     ReceiptProviderInputDTO,
 )
 from app.dto.transactions import (
@@ -238,9 +244,13 @@ class TransactionService:
         if not account:
             raise NotFoundError("Счёт не найден")
 
+        if self._receipts.find_by_raw_qr(dto.qr):
+            raise ConflictError("Этот чек уже добавлен")
+
         receipt_data = self._receipt_provider.get_receipt_by_qr(
             ReceiptProviderInputDTO(qr=dto.qr)
         )
+        self._ensure_receipt_not_duplicate(receipt_data.receipt)
 
         merchant = self._find_or_create_merchant(receipt_data.merchant.name, receipt_data.merchant.inn, receipt_data.merchant.address)
 
@@ -365,6 +375,15 @@ class TransactionService:
             items=response_items,
         )
         return TransactionResponseDTO(transaction=detail)
+
+    def _ensure_receipt_not_duplicate(self, meta: ReceiptMetaDTO) -> None:
+        fn = meta.fiscal_drive_number
+        fd = meta.fiscal_document_number
+        fp = meta.fiscal_sign
+        if not (fn and fd and fp):
+            return
+        if self._receipts.find_by_fiscal_ids(fn, fd, fp):
+            raise ConflictError("Этот чек уже добавлен")
 
     def _normalize_unknown_items(
         self, merchant_name: str, unknown_items: list[ReceiptItemDTO]

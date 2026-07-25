@@ -1,10 +1,8 @@
 """QR-чек: создание через моки provider/normalizer, баланс, fallback LLM."""
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 
 from app.core.enums import TransactionSource
-from app.core.exceptions import ExternalServiceError, NotFoundError
+from app.core.exceptions import ConflictError, ExternalServiceError, NotFoundError
 from app.core.uuid_utils import new_uid
 from app.database.models import Account, Category, Product, User
 from app.dto.receipts import (
@@ -156,17 +154,74 @@ def test_create_from_receipt_provider_error_propagates(
         )
 
 
+def test_duplicate_receipt_by_same_qr_raises_conflict(
+    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+) -> None:
+    provider = FakeReceiptProvider(default_receipt_output(total_sum=100_00))
+    service = TransactionService(
+        db, receipt_provider=provider, product_normalizer=FakeProductNormalizer()
+    )
+    dto = CreateTransactionFromReceiptDTO(
+        user_id=user.id,
+        account_uid=account.uid,
+        qr="t=20260610T1530&s=100.00&fn=1&i=1&fp=1&n=1",
+        timezone="Europe/Moscow",
+    )
+    service.create_transaction_from_receipt(dto)
+    db.refresh(account)
+    balance_after_first = account.balance
+
+    with pytest.raises(ConflictError, match="уже добавлен"):
+        service.create_transaction_from_receipt(dto)
+
+    db.refresh(account)
+    assert account.balance == balance_after_first
+    assert len(provider.calls) == 1  # повторный QR — без вызова провайдера
+
+
+def test_duplicate_receipt_by_fiscal_ids_raises_conflict(
+    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+) -> None:
+    """Тот же ФН/ФД/ФП, но другая строка QR — тоже дубликат."""
+    provider = FakeReceiptProvider(default_receipt_output(total_sum=100_00))
+    service = TransactionService(
+        db, receipt_provider=provider, product_normalizer=FakeProductNormalizer()
+    )
+    service.create_transaction_from_receipt(
+        CreateTransactionFromReceiptDTO(
+            user_id=user.id,
+            account_uid=account.uid,
+            qr="t=20260610T1530&s=100.00&fn=9999000001&i=12345&fp=987654321&n=1",
+            timezone="Europe/Moscow",
+        )
+    )
+    db.refresh(account)
+    balance_after_first = account.balance
+
+    with pytest.raises(ConflictError, match="уже добавлен"):
+        service.create_transaction_from_receipt(
+            CreateTransactionFromReceiptDTO(
+                user_id=user.id,
+                account_uid=account.uid,
+                qr="t=20260610T1530&s=100.00&fn=9999000001&i=12345&fp=987654321&n=1&extra=1",
+                timezone="Europe/Moscow",
+            )
+        )
+
+    db.refresh(account)
+    assert account.balance == balance_after_first
+    assert len(provider.calls) == 2
+
+
 def test_second_scan_matches_alias(
     db: Session, user: User, account: Account, system_categories: dict[str, Category]
 ) -> None:
-    """После первого чека alias известен — второй не ходит в LLM."""
+    """После первого чека alias известен — второй (другой чек) не ходит в LLM."""
+    items = [
+        ReceiptItemDTO(raw_name="УНИКАЛЬНЫЙ ТОВАР", price=100_00, quantity=1, amount=100_00)
+    ]
     provider = FakeReceiptProvider(
-        default_receipt_output(
-            total_sum=100_00,
-            items=[
-                ReceiptItemDTO(raw_name="УНИКАЛЬНЫЙ ТОВАР", price=100_00, quantity=1, amount=100_00)
-            ],
-        )
+        default_receipt_output(total_sum=100_00, items=items)
     )
     normalizer = FakeProductNormalizer(
         ProductNormalizerOutputDTO(
@@ -183,14 +238,29 @@ def test_second_scan_matches_alias(
         )
     )
     service = TransactionService(db, receipt_provider=provider, product_normalizer=normalizer)
-    dto = CreateTransactionFromReceiptDTO(
-        user_id=user.id,
-        account_uid=account.uid,
-        qr="t=20260610T1530&s=100.00&fn=1&i=1&fp=1&n=1",
-        timezone="Europe/Moscow",
+    service.create_transaction_from_receipt(
+        CreateTransactionFromReceiptDTO(
+            user_id=user.id,
+            account_uid=account.uid,
+            qr="t=20260610T1530&s=100.00&fn=1&i=1&fp=1&n=1",
+            timezone="Europe/Moscow",
+        )
     )
-    service.create_transaction_from_receipt(dto)
     assert normalizer.calls == 1
 
-    service.create_transaction_from_receipt(dto)
+    provider.output = default_receipt_output(
+        total_sum=100_00,
+        items=items,
+        fiscal_drive_number="9999000002",
+        fiscal_document_number="12346",
+        fiscal_sign="987654322",
+    )
+    service.create_transaction_from_receipt(
+        CreateTransactionFromReceiptDTO(
+            user_id=user.id,
+            account_uid=account.uid,
+            qr="t=20260611T1530&s=100.00&fn=2&i=2&fp=2&n=1",
+            timezone="Europe/Moscow",
+        )
+    )
     assert normalizer.calls == 1  # второй раз — через alias
