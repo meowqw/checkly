@@ -6,6 +6,45 @@
 
 ---
 
+## 0. Инструкции для AI-агента (обязательно читать)
+
+### Роль
+
+Ты — **сеньор Python / FastAPI разработчик**. Пишешь production-код: ясно, узко по задаче, с уважением к существующей архитектуре. Не джун-спагетти, не «переписать всё с нуля».
+
+### Как правильно писать код здесь
+
+1. **Слои строго:** `api → services → repositories → models`. API **не** импортирует repositories (исключений нет; сервис сам создаёт repo из `Session`).
+2. **Не ломай контракт API** без явной просьбы. Аддитивные поля/query-параметры — ок; breaking changes — только с миграцией фронта.
+3. **Не трогай фронт** (`web/`), если пользователь не попросил. Бэкенд-задачи = только `app/`, `alembic/`, `scripts/`, `tests/`, этот файл.
+4. **Деньги** — только `int` копейки. **ID наружу** — только `uid` (UUID). Внутренний `id` наружу не отдавать.
+5. **Даты в БД** — naive local wall-clock в TZ пользователя (`app/core/dates.py`), не UTC.
+6. **Баланс счёта** меняется только через create/update/delete транзакций (`TransactionService`), не «магически» в PATCH account без нужды.
+7. **QR** нельзя `PATCH` целиком; категории позиций — можно. Внешние API (proverkacheka, LLM) — только через интерфейсы + моки в тестах.
+8. **Минимальный diff:** не рефактори соседний код «заодно», не добавляй зависимости без нужды, не пиши markdown/доки без просьбы (кроме обновления этого файла, когда меняется бэкенд-контракт или структура).
+9. **После существенных правок** — прогон тестов:
+   ```bash
+   docker compose exec app pytest tests/ -q
+   ```
+10. **Новый endpoint** → router + service + dto + OpenAPI (`summary`/`description`, `Field(description=...)`). Новая таблица → model + Alembic (не `create_all` в prod).
+
+### Чего не делать
+
+- Не коммитить и не пушить без явной просьбы пользователя.
+- Не вызывать реальные LLM/proverkacheka в unit/integration тестах.
+- Не удалять системные категории и не ломать идемпотентность сидеров.
+- Не «ускорять» bcrypt/login ценой безопасности.
+- Не менять смысл stats (суммы tx vs категории по items) без согласования.
+
+### Быстрый чеклист перед сдачей задачи
+
+- [ ] Слои соблюдены, публичные ID = uid, деньги = int
+- [ ] Старый клиент без новых query-параметров не сломан (если менялся API)
+- [ ] `pytest tests/ -q` зелёный
+- [ ] При изменении API/архитектуры — обновлён **этот** `BACKEND.md`
+
+---
+
 ## 1. Что это за продукт
 
 **Finance Manager (Checkly)** — MVP личного учёта финансов с упором на **российские фискальные чеки**.
@@ -40,8 +79,9 @@
 | Чеки | proverkacheka.com API |
 | AI-категоризация | OpenAI / xAI Grok / Groq (через OpenAI SDK) |
 | Docker | `docker-compose.yml`, `Dockerfile` |
+| Тесты | pytest + httpx (`requirements-dev.txt`), SQLite in-memory |
 
-Зависимости: `requirements.txt`
+Зависимости: `requirements.txt` (runtime), `requirements-dev.txt` (pytest, httpx)
 
 ---
 
@@ -77,6 +117,7 @@ finance_manager/
 │   │   ├── dates.py            # timezone, normalize_range, to_storage_datetime
 │   │   ├── security.py         # JWT, hash password
 │   │   ├── exceptions.py
+│   │   ├── timing_middleware.py  # X-Process-Time / X-Process-Time-Ms
 │   │   ├── category_taxonomy.py  # дерево категорий + keyword hints для LLM
 │   │   ├── category_display.py   # category_display_name() для API
 │   │   └── uuid_utils.py
@@ -87,7 +128,17 @@ finance_manager/
 │   └── versions/               # 001–004
 ├── scripts/
 │   ├── seed_categories.py
+│   ├── seed_demo_data.py       # тестовые пользователи/tx/чеки
+│   ├── benchmark_api.py        # latency эндпоинтов
 │   └── clean_receipt_data.py
+├── tests/
+│   ├── conftest.py             # SQLite + фикстуры
+│   ├── helpers.py              # FakeReceiptProvider / FakeProductNormalizer
+│   ├── unit/
+│   └── integration/
+├── pytest.ini
+├── requirements.txt
+├── requirements-dev.txt
 ├── docker-compose.yml          # dev
 ├── docker-compose.prod.yml
 ├── docker-compose.prod-ip.yml
@@ -105,9 +156,11 @@ HTTP → api/v1/*.py (тонкий контроллер)
      → database/models.py
 ```
 
-**API не ходит в repositories напрямую** — только через services.
+**API не ходит в repositories напрямую** — только через services (`StatsService(db)`, `TransactionService(db)`, …).
 
 Внешние сервисы подменяются через интерфейсы в `TransactionService(receipt_provider=..., product_normalizer=...)`.
+
+**Latency:** каждый ответ содержит заголовки `X-Process-Time` (сек) и `X-Process-Time-Ms` (`TimingMiddleware`). Медленные запросы (>200 мс) пишутся в лог warning.
 
 ---
 
@@ -169,12 +222,26 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 | Method | Path | Query / Body | Response |
 |--------|------|--------------|----------|
-| GET | `/` | `from`, `to`, `type`, `account_id` | `{transactions: [...]}` |
+| GET | `/` | `from`, `to`, `type`, `account_id`, **`limit?`**, **`offset?`** | `{transactions: [...]}` (+ meta при пагинации) |
 | POST | `/` | manual tx body | `{transaction}` |
 | GET | `/{id}` | — | `{transaction}` (detail) |
 | PATCH | `/{id}` | `{amount?, category_id?, comment?}` | `{transaction}` — **только manual** |
 | PATCH | `/{id}/items/{item_id}` | `{category_id}` | `{transaction}` |
 | DELETE | `/{id}` | — | `{success: true}` |
+
+**Пагинация (аддитивная, фронт без изменений работает):**
+- Без `limit` — весь список по фильтру, **без** полей `total` / `limit` / `offset` / `has_more` (`response_model_exclude_none`)
+- С `limit` (1…100) и `offset` (≥0):
+```json
+{
+  "transactions": [ /* страница */ ],
+  "total": 226,
+  "limit": 20,
+  "offset": 0,
+  "has_more": true
+}
+```
+- Константа max: `TRANSACTIONS_MAX_LIMIT = 100` в `transaction_service.py`
 
 **Create manual:**
 ```json
@@ -194,6 +261,7 @@ HTTP → api/v1/*.py (тонкий контроллер)
 - `category` в list — **только manual**; для `qr_receipt` → `null`
 - `items[].category` — `{name}` (`CategoryBriefDTO`), не `dict`
 - Маппинг list/detail: `transaction_mapper.py` (используется и в `TransactionService`, и в `StatsService`)
+- Загрузка связей: `selectinload` (account, merchant, items→category→parent)
 
 **Detail item:** `{id, amount, source, type, currency, occurred_at, comment, merchant, items: [{id, raw_name, amount, category_id, category}]}`
 
@@ -227,15 +295,19 @@ HTTP → api/v1/*.py (тонкий контроллер)
 ```
 
 **Правила агрегации (`StatsService`):**
-- `expense` / `income` — сумма `transaction.amount` за период
-- `categories` — **только расходы**; для чеков суммируются **позиции** (`transaction_items.amount`), не сумма чека целиком
-- `percent` — доля от общих расходов за период
+- `expense` / `income` — `SUM(transaction.amount)` по типу (SQL)
+- `categories` — **только расходы**; для чеков суммируются **позиции** (`transaction_items.amount`), не сумма чека целиком (SQL GROUP BY + display-name в Python)
+- транзакции **без позиций** → сумма tx в категорию «Прочее»
+- `percent` — доля от суммы категорийных расходов за период
 - `color` — из категории; у подкатегорий наследуется `parent.color`
-- `recent_expenses` — последние 8 расходов (`occurred_at DESC`); `compact=True` — без всех позиций чека (легче payload)
+- `recent_expenses` — отдельные `LIMIT 8` расходов (`occurred_at DESC`); `compact=True`
 
 Query **`type` нет** — stats всегда считает и расходы, и доходы.
 
-Файлы: `app/api/v1/stats.py`, `app/services/stats_service.py`, `app/dto/stats.py`, `app/services/transaction_queries.py`
+Реализация: **не** грузит все tx в Python. Три запроса в repo:
+`sum_amounts_by_type`, `aggregate_expense_category_amounts`, `list_recent_expenses`.
+
+Файлы: `app/api/v1/stats.py`, `app/services/stats_service.py`, `app/dto/stats.py`, `app/repositories/transaction_repository.py`, `app/services/transaction_queries.py`
 
 **Главная страница фронта** использует только этот endpoint (не тянет полный `/transactions`).
 
@@ -438,9 +510,10 @@ Prompt включает дерево категорий из `build_taxonomy_pro
 
 Файл: `app/services/stats_service.py`
 
-- Загрузка строк: `list_transactions_for_filters()` (`transaction_queries.py`) — те же фильтры, что у list transactions
-- Агрегация по категориям — в Python (не SQL GROUP BY); для MVP достаточно
-- `recent_expenses`: `map_transaction_to_list_item(tx, compact=True)` из `transaction_mapper.py`
+- Конструктор: `StatsService(db)` — как у остальных сервисов
+- Фильтры: `resolve_transaction_filters()` (`transaction_queries.py`)
+- Агрегаты — SQL в `TransactionRepository` (не загрузка всех строк)
+- `recent_expenses`: `map_transaction_to_list_item(tx, compact=True)`
 - **Не** создаёт `TransactionService` (нет лишней инициализации LLM/receipt provider)
 
 ---
@@ -489,13 +562,42 @@ Docker MySQL: `MYSQL_ROOT_PASSWORD`, `MYSQL_DATABASE`, `MYSQL_USER`, `MYSQL_PASS
 | Скрипт | Назначение |
 |--------|------------|
 | `scripts/seed_categories.py` | системные категории |
+| `scripts/seed_demo_data.py` | демо-пользователи, счета, manual/QR tx (идемпотентно; `--force`) |
+| `scripts/benchmark_api.py` | latency всех основных эндпоинтов (`X-Process-Time-Ms`) |
 | `scripts/clean_receipt_data.py` | очистка QR-транзакций/products для повторного теста |
 
 ```bash
+# демо-данные (логин demo / demo12345)
+docker compose exec app python scripts/seed_demo_data.py
+docker compose exec app python scripts/seed_demo_data.py --force
+
+# бенчмарк
+docker compose exec app python scripts/benchmark_api.py --runs 15
+
 python scripts/clean_receipt_data.py --all
 python scripts/clean_receipt_data.py --products
 python scripts/clean_receipt_data.py --qr-transactions
 ```
+
+Демо-аккаунты: `demo`, `alice`, `bob` — пароль `demo12345`.
+
+---
+
+## 14.1 Тесты
+
+```bash
+docker compose exec app pip install -q -r requirements-dev.txt
+docker compose exec app pytest tests/ -q
+```
+
+| Каталог | Что |
+|---------|-----|
+| `tests/unit/` | dates, security/JWT, category_display, taxonomy, transaction_mapper |
+| `tests/integration/` | auth, accounts, balance, QR (моки), stats, list/pagination, categories, product matching |
+| `tests/helpers.py` | `FakeReceiptProvider`, `FakeProductNormalizer` |
+| `tests/conftest.py` | SQLite in-memory (`StaticPool`), BigInteger→Integer для AUTOINCREMENT |
+
+Покрывать обязательно при правках: **баланс**, **manual vs QR edit rules**, **stats (items vs tx.amount)**, **пагинация**, **ownership** (чужой uid → 404/403).
 
 ---
 
@@ -517,16 +619,20 @@ Handlers в `main.py`: `AppError`, `IntegrityError` → 409, generic → 500.
 
 ## 16. Конвенции для правок
 
-1. Новый endpoint → `api/v1/` + service + repository + dto + **`openapi.py`** (тег/описание)
+1. Новый endpoint → `api/v1/` + service + dto + **`openapi.py`** / `summary`/`description` на роуте
 2. Новая таблица → model + alembic migration (не `create_all` в prod)
 3. Новая системная категория → **`category_taxonomy.py`** + перезапуск сидера (идемпотентно, prod-safe)
 4. Изменение LLM prompt → `product_normalizer_common.py` + `category_taxonomy.py`
 5. List-маппинг транзакций → **`transaction_mapper.py`** (не дублировать в сервисах)
-6. Фильтрованный список tx → **`transaction_queries.py`**
-7. Агрегаты для UI → **`stats_service.py`**, не считать на фронте (offline fallback — исключение)
+6. Фильтрованный список tx → **`transaction_queries.py`** (`resolve_transaction_filters`)
+7. Агрегаты для UI → **`stats_service.py`** + SQL в repo; не считать на фронте (offline fallback — исключение)
 8. Публичные ID — только `uid`
 9. Деньги — только копейки, без float
 10. DTO: `*RequestDTO` / `*ResponseDTO` для API; внутренние service DTO без суффиксов Request/Response
+11. Сервисы принимают `Session` (`FooService(db)`), сами создают repositories
+12. Внешние HTTP/LLM — только через `interfaces/` + implementations; в тестах — `tests/helpers.py`
+13. После изменения API/слоёв/скриптов — обновить **BACKEND.md**
+14. Прогон: `docker compose exec app pytest tests/ -q`
 
 ---
 
@@ -548,6 +654,10 @@ Handlers в `main.py`: `AppError`, `IntegrityError` → 409, generic → 500.
 | LLM выбор | `app/implementations/product_normalizer_factory.py` |
 | Auth deps | `app/api/deps.py` |
 | Даты | `app/core/dates.py` |
+| Timing headers | `app/core/timing_middleware.py` |
+| Тесты | `tests/` |
+| Демо-данные | `scripts/seed_demo_data.py` |
+| Бенчмарк | `scripts/benchmark_api.py` |
 
 ### Типичный сценарий API
 
@@ -558,6 +668,7 @@ POST /v1/transactions      {manual expense}
 POST /v1/receipts/qr       {"account_id":"...","qr":"t=...&s=..."}
 GET  /v1/stats?from=2026-06-01&to=2026-06-30
 GET  /v1/transactions?from=2026-06-01&to=2026-06-30
+GET  /v1/transactions?from=2026-06-01&to=2026-06-30&limit=20&offset=0
 PATCH /v1/transactions/{id}/items/{item_id}  {"category_id":"..."}
 ```
 
@@ -574,4 +685,7 @@ docker compose up -d
 ```bash
 docker compose exec app alembic upgrade head
 docker compose exec app python scripts/seed_categories.py
+docker compose exec app python scripts/seed_demo_data.py   # опционально
+docker compose exec app pip install -q -r requirements-dev.txt
+docker compose exec app pytest tests/ -q
 ```

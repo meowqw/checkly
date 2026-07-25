@@ -7,7 +7,6 @@ from app.api.deps import CurrentUser, DbSession, UserTimezone
 from app.dto.stats import StatsResponseDTO
 from app.dto.transactions import TransactionFilterDTO
 from app.openapi import COMMON_ERROR_RESPONSES
-from app.repositories.transaction_repository import TransactionRepository
 from app.services.stats_service import StatsService
 
 router = APIRouter(prefix="/stats", tags=["stats"])
@@ -48,4 +47,4 @@ def get_stats(
         account_uid=account_id,
         timezone=tz,
     )
-    return StatsService(TransactionRepository(db)).get_stats(filters)
+    return StatsService(db).get_stats(filters)

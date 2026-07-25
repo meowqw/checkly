@@ -6,11 +6,11 @@ DEFAULT_TIMEZONE = "Europe/Moscow"
 
 
 def resolve_timezone(name: str | None) -> str:
-    candidate = (name or DEFAULT_TIMEZONE).strip()
+    candidate = (name or DEFAULT_TIMEZONE).strip() or DEFAULT_TIMEZONE
     try:
         ZoneInfo(candidate)
         return candidate
-    except ZoneInfoNotFoundError:
+    except (ZoneInfoNotFoundError, ValueError):
         return DEFAULT_TIMEZONE
 
 

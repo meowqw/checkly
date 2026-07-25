@@ -18,7 +18,7 @@ from app.dto.transactions import (
     UpdateTransactionRequestDTO,
 )
 from app.openapi import COMMON_ERROR_RESPONSES
-from app.services.transaction_service import TransactionService
+from app.services.transaction_service import TRANSACTIONS_MAX_LIMIT, TransactionService
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
@@ -28,10 +28,14 @@ _AUTH_ERRORS = {401: COMMON_ERROR_RESPONSES[401]}
 @router.get(
     "",
     response_model=TransactionsListResponseDTO,
+    response_model_exclude_none=True,
     summary="Список транзакций",
     description=(
         "Фильтрация по периоду (`from`, `to` — даты YYYY-MM-DD в часовом поясе клиента), "
-        "типу и счёту. В списке есть поля title, account, category (отображаемое имя)."
+        "типу и счёту. В списке есть поля title, account, category (отображаемое имя).\n\n"
+        "Пагинация опциональна: без `limit` возвращается весь список (как раньше). "
+        "С `limit`/`offset` в ответ добавляются `total`, `limit`, `offset`, `has_more` "
+        f"(max limit = {TRANSACTIONS_MAX_LIMIT})."
     ),
     responses=_AUTH_ERRORS,
 )
@@ -51,6 +55,13 @@ def list_transactions(
     ),
     type: TransactionType | None = Query(default=None, description="Фильтр: expense или income"),
     account_id: str | None = Query(default=None, description="UUID счёта"),
+    limit: int | None = Query(
+        default=None,
+        ge=1,
+        le=TRANSACTIONS_MAX_LIMIT,
+        description="Размер страницы. Без параметра — весь список (совместимость со старым клиентом)",
+    ),
+    offset: int = Query(default=0, ge=0, description="Смещение от начала выборки"),
 ) -> TransactionsListResponseDTO:
     filters = TransactionFilterDTO(
         user_id=user.id,
@@ -59,6 +70,8 @@ def list_transactions(
         type=type,
         account_uid=account_id,
         timezone=tz,
+        limit=limit,
+        offset=offset,
     )
     return TransactionService(db).list_transactions(filters)
 

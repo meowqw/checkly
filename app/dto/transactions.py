@@ -51,6 +51,15 @@ class TransactionListItemDTO(BaseModel):
 
 class TransactionsListResponseDTO(BaseModel):
     transactions: list[TransactionListItemDTO] = Field(description="Список транзакций")
+    # Метаданные пагинации — только если передан query-параметр limit
+    total: int | None = Field(
+        default=None, description="Всего записей по фильтру (при пагинации)"
+    )
+    limit: int | None = Field(default=None, description="Размер страницы (при пагинации)")
+    offset: int | None = Field(default=None, description="Смещение (при пагинации)")
+    has_more: bool | None = Field(
+        default=None, description="Есть ли ещё записи после текущей страницы"
+    )
 
 
 class CreateManualTransactionRequestDTO(BaseModel):
@@ -92,6 +101,8 @@ class TransactionFilterDTO(BaseModel):
     type: TransactionType | None = None
     account_uid: str | None = None
     timezone: str = "Europe/Moscow"
+    limit: int | None = None
+    offset: int = 0
 
 
 class CreateManualTransactionDTO(BaseModel):

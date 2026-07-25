@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 from app.api.v1.router import api_router
 from app.config import get_settings
 from app.core.exceptions import AppError
+from app.core.timing_middleware import TimingMiddleware
 from app.openapi import API_DESCRIPTION, OPENAPI_TAGS
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def create_app() -> FastAPI:
         )
 
     app = FastAPI(
-        title="Finance Manager API",
+        title="Checkly (Finance Manager) API",
         description=API_DESCRIPTION,
         version="1.0.0",
         debug=settings.app_debug,
@@ -73,6 +74,8 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    # После CORS: TimingMiddleware — внутренний слой, в заголовке X-Process-Time-Ms
+    app.add_middleware(TimingMiddleware)
 
     @app.exception_handler(AppError)
     async def app_error_handler(_: Request, exc: AppError) -> JSONResponse:

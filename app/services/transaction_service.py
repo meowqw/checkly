@@ -52,9 +52,15 @@ from app.repositories.user_product_override_repository import UserProductCategor
 from app.services.category_service import CategoryService
 from app.services.product_matching_service import ProductMatchingService
 from app.services.transaction_mapper import map_item_to_brief, map_transaction_to_list_item
-from app.services.transaction_queries import list_transactions_for_filters
+from app.services.transaction_queries import (
+    list_transactions_for_filters,
+    resolve_transaction_filters,
+)
 
 logger = logging.getLogger(__name__)
+
+# Верхняя граница page size для GET /transactions?limit=
+TRANSACTIONS_MAX_LIMIT = 100
 
 
 class TransactionService:
@@ -78,9 +84,32 @@ class TransactionService:
         self._product_normalizer = product_normalizer or get_product_normalizer()
 
     def list_transactions(self, filters: TransactionFilterDTO) -> TransactionsListResponseDTO:
-        rows = list_transactions_for_filters(self._transactions, filters)
+        # Без limit — прежнее поведение: весь список по фильтру (фронт не ломаем)
+        if filters.limit is None:
+            rows = list_transactions_for_filters(self._transactions, filters)
+            return TransactionsListResponseDTO(
+                transactions=[map_transaction_to_list_item(t) for t in rows]
+            )
+
+        limit = min(max(filters.limit, 1), TRANSACTIONS_MAX_LIMIT)
+        offset = max(filters.offset, 0)
+        paginated = filters.model_copy(update={"limit": limit, "offset": offset})
+
+        resolved = resolve_transaction_filters(self._transactions, paginated)
+        total = self._transactions.count_for_user(
+            resolved.user_id,
+            from_date=resolved.from_date,
+            to_date=resolved.to_date,
+            transaction_type=resolved.transaction_type,
+            account_id=resolved.account_id,
+        )
+        rows = list_transactions_for_filters(self._transactions, paginated)
         return TransactionsListResponseDTO(
-            transactions=[map_transaction_to_list_item(t) for t in rows]
+            transactions=[map_transaction_to_list_item(t) for t in rows],
+            total=total,
+            limit=limit,
+            offset=offset,
+            has_more=offset + len(rows) < total,
         )
 
     def get_transaction(self, user_id: int, transaction_uid: str) -> TransactionResponseDTO:
