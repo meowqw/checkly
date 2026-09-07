@@ -17,7 +17,7 @@ def test_update_qr_item_category(
         db,
         user=user,
         account=account,
-        items=[("Чипсы", 150_00, system_categories["snacks"])],
+        items=[("Чипсы", 150_00, system_categories["products"], [system_categories["snacks"]])],
     )
     item = qr.items[0]
     result = TransactionService(db).update_transaction_item(
@@ -25,13 +25,15 @@ def test_update_qr_item_category(
             user_id=user.id,
             transaction_uid=qr.uid,
             item_uid=item.uid,
-            category_uid=system_categories["dairy"].uid,
+            category_uid=system_categories["products"].uid,
+            tag_uids=[system_categories["dairy"].uid],
         )
     )
     assert result.transaction.source == TransactionSource.QR_RECEIPT.value
     assert result.transaction.items is not None
     updated = next(i for i in result.transaction.items if i.id == item.uid)
-    assert updated.category_id == system_categories["dairy"].uid
+    assert updated.category_id == system_categories["products"].uid
+    assert any(t.id == system_categories["dairy"].uid for t in updated.tags)
 
 
 def test_update_item_with_product_creates_override(
@@ -41,7 +43,7 @@ def test_update_item_with_product_creates_override(
         uid=new_uid(),
         name="Молоко",
         normalized_name="Молоко",
-        category_id=system_categories["dairy"].id,
+        category_id=system_categories["products"].id,
     )
     db.add(product)
     db.commit()
@@ -51,7 +53,7 @@ def test_update_item_with_product_creates_override(
         db,
         user=user,
         account=account,
-        items=[("Молоко дом", 89_00, system_categories["dairy"])],
+        items=[("Молоко дом", 89_00, system_categories["products"], [system_categories["dairy"]])],
         product=product,
     )
     item = qr.items[0]

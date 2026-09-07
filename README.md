@@ -141,10 +141,11 @@ Prefix: `/v1` · Auth: `Authorization: Bearer <token>` · Timezone: `X-Timezone:
 |-------|------|----------|
 | POST | `/v1/auth/register`, `/login` | Регистрация / вход |
 | CRUD | `/v1/accounts` | Счета |
-| CRUD | `/v1/categories` | Категории (`?include=children`) |
+| CRUD | `/v1/categories` | Плоские категории |
+| CRUD | `/v1/tags` | Независимые теги |
 | CRUD | `/v1/transactions` | Операции, фильтры `from`/`to` |
 | GET | `/v1/stats` | Статистика за период (расходы/доходы, категории, recent) |
-| PATCH | `/v1/transactions/{id}/items/{item_id}` | Категория позиции чека |
+| PATCH | `/v1/transactions/{id}/items/{item_id}` | Категория и теги позиции |
 | POST | `/v1/receipts/qr` | Импорт чека по QR |
 
 Детали, схемы и примеры: **http://localhost:8000/docs** и [BACKEND.md](BACKEND.md).
@@ -164,7 +165,7 @@ finance_manager/
 │   └── core/               # enums, dates, category_taxonomy
 ├── alembic/                # миграции БД
 ├── scripts/
-│   ├── seed_categories.py  # системные категории (идемпотентно)
+│   ├── seed_categories.py  # системные категории + теги (идемпотентно)
 │   └── clean_receipt_data.py
 ├── web/                    # React + Capacitor клиент
 ├── deploy/                 # инструкции деплоя

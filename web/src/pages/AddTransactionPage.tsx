@@ -9,18 +9,17 @@ import { CategoryPicker } from "@/components/CategoryPicker";
 import { NoAccountsNotice } from "@/components/NoAccountsNotice";
 import { FormSkeleton } from "@/components/mobile/Skeleton";
 import { Button } from "@/components/ui/button";
-import { getRootCategories, getSubcategories } from "@/lib/categories";
+import { getRootCategories } from "@/lib/categories";
 import { toApiDateTimeLocal, toDateTimeLocalValue } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 export default function AddTransactionPage() {
   const navigate = useNavigate();
   const { accounts, loading: accountsLoading } = useAccounts();
-  const [categoryTree, setCategoryTree] = useState<Category[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [accountId, setAccountId] = useState("");
   const [type, setType] = useState<"expense" | "income">("expense");
-  const [parentCategoryId, setParentCategoryId] = useState("");
-  const [subcategoryId, setSubcategoryId] = useState("");
+  const [categoryId, setCategoryId] = useState("");
   const [amountRub, setAmountRub] = useState("");
   const [comment, setComment] = useState("");
   const [occurredAt, setOccurredAt] = useState(() => toDateTimeLocalValue());
@@ -28,15 +27,7 @@ export default function AddTransactionPage() {
   const [loading, setLoading] = useState(false);
   const [initialLoading, setInitialLoading] = useState(true);
 
-  const rootCategories = useMemo(
-    () => getRootCategories(categoryTree, type),
-    [categoryTree, type]
-  );
-
-  const subcategories = useMemo(
-    () => (parentCategoryId ? getSubcategories(categoryTree, parentCategoryId) : []),
-    [categoryTree, parentCategoryId]
-  );
+  const rootCategories = useMemo(() => getRootCategories(categories, type), [categories, type]);
 
   useEffect(() => {
     if (accounts[0] && !accountId) setAccountId(accounts[0].id);
@@ -48,7 +39,7 @@ export default function AddTransactionPage() {
       .getCategories()
       .then((cat) => {
         if (cancelled) return;
-        setCategoryTree(cat.categories);
+        setCategories(cat.categories);
         setInitialLoading(false);
       })
       .catch((err) => {
@@ -63,15 +54,8 @@ export default function AddTransactionPage() {
   }, []);
 
   useEffect(() => {
-    setParentCategoryId("");
-    setSubcategoryId("");
+    setCategoryId("");
   }, [type]);
-
-  useEffect(() => {
-    setSubcategoryId("");
-  }, [parentCategoryId]);
-
-  const finalCategoryId = subcategoryId || parentCategoryId || undefined;
 
   const setNow = () => setOccurredAt(toDateTimeLocalValue(new Date()));
 
@@ -88,7 +72,7 @@ export default function AddTransactionPage() {
         amount: rublesToKopecks(rub),
         currency: "RUB",
         occurred_at: toApiDateTimeLocal(occurredAt),
-        category_id: finalCategoryId,
+        category_id: categoryId || undefined,
         comment: comment || undefined,
       });
       navigate("/");
@@ -186,11 +170,8 @@ export default function AddTransactionPage() {
 
         <CategoryPicker
           roots={rootCategories}
-          subcategories={subcategories}
-          parentId={parentCategoryId}
-          subcategoryId={subcategoryId}
-          onParentChange={setParentCategoryId}
-          onSubcategoryChange={setSubcategoryId}
+          selectedId={categoryId}
+          onChange={setCategoryId}
         />
 
         <label className="block">

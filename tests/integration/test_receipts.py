@@ -52,7 +52,7 @@ def test_create_from_receipt_reuses_known_product_by_gtin(
         name="Молоко",
         normalized_name="Молоко",
         gtin="4600000000001",
-        category_id=system_categories["dairy"].id,
+        category_id=system_categories["products"].id,
     )
     db.add(product)
     db.commit()
@@ -83,7 +83,7 @@ def test_create_from_receipt_reuses_known_product_by_gtin(
     )
     assert normalizer.calls == 0  # known by gtin — LLM не нужен
     assert result.transaction.items is not None
-    assert result.transaction.items[0].category_id == system_categories["dairy"].uid
+    assert result.transaction.items[0].category_id == system_categories["products"].uid
 
 
 def test_create_from_receipt_llm_fallback_to_prochee(
@@ -231,7 +231,7 @@ def test_second_scan_matches_alias(
                     normalized_name="Уникальный товар",
                     product_name="Уникальный товар",
                     category="Продукты",
-                    subcategory="Снэки",
+                    tags=["Снэки"],
                     confidence=0.95,
                 )
             ]

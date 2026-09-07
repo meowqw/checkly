@@ -29,7 +29,7 @@ def test_create_expense_decreases_balance(
             amount=1_500_00,
             currency=Currency.RUB,
             occurred_at=datetime(2026, 6, 1, 12, 0, 0),
-            category_uid=system_categories["dairy"].uid,
+            category_uid=system_categories["products"].uid,
             comment="Молоко",
             timezone="Europe/Moscow",
         )
@@ -69,7 +69,7 @@ def test_update_expense_amount_applies_delta(
             amount=1_000_00,
             currency=Currency.RUB,
             occurred_at=datetime(2026, 6, 1, 12, 0, 0),
-            category_uid=system_categories["dairy"].uid,
+            category_uid=system_categories["products"].uid,
             comment="x",
             timezone="Europe/Moscow",
         )
@@ -146,7 +146,7 @@ def test_cannot_update_qr_transaction(
         db,
         user=user,
         account=account,
-        items=[("Молоко", 100_00, system_categories["dairy"])],
+        items=[("Молоко", 100_00, system_categories["products"], [system_categories["dairy"]])],
     )
     with pytest.raises(ForbiddenError):
         TransactionService(db).update_transaction(

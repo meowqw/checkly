@@ -1,8 +1,7 @@
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import * as data from "@/api/data-service";
-import type { Category } from "@/api/client";
 import { ApiError } from "@/api/client";
 import { CategoryIcon } from "@/components/CategoryIcon";
 import { Button } from "@/components/ui/button";
@@ -11,34 +10,25 @@ import {
   PRESET_CATEGORY_ICONS,
   resolveCategoryIcon,
 } from "@/lib/category-icons";
-import { getRootCategories } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
 type Props = {
   open: boolean;
   type: "expense" | "income";
-  categories: Category[];
   onClose: () => void;
   onCreated: () => void;
 };
 
-export function CreateCategorySheet({ open, type, categories, onClose, onCreated }: Props) {
+export function CreateCategorySheet({ open, type, onClose, onCreated }: Props) {
   const [name, setName] = useState("");
-  const [parentId, setParentId] = useState("");
   const [icon, setIcon] = useState("tag");
   const [color, setColor] = useState(PRESET_CATEGORY_COLORS[0]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const roots = useMemo(
-    () => getRootCategories(categories, type).filter((c) => !c.is_custom),
-    [categories, type]
-  );
-
   useEffect(() => {
     if (!open) return;
     setName("");
-    setParentId("");
     setIcon("tag");
     setColor(PRESET_CATEGORY_COLORS[0]);
     setError("");
@@ -59,7 +49,6 @@ export function CreateCategorySheet({ open, type, categories, onClose, onCreated
       await data.createCategory({
         name: trimmed,
         type,
-        parent_id: parentId || undefined,
         icon,
         color,
       });
@@ -95,7 +84,7 @@ export function CreateCategorySheet({ open, type, categories, onClose, onCreated
           </div>
 
           <p className="mb-4 text-xs text-neutral-500">
-            Свои категории доступны при ручном вводе. При сканировании чеков используются только системные.
+            Свои категории — для ручного ввода. Чеки мапятся на системные категории и теги.
           </p>
 
           {error && (
@@ -114,24 +103,6 @@ export function CreateCategorySheet({ open, type, categories, onClose, onCreated
               maxLength={255}
             />
           </label>
-
-          {roots.length > 0 && (
-            <label className="mb-4 block">
-              <span className="mb-1.5 block text-xs text-neutral-500">Родительская (необязательно)</span>
-              <select
-                value={parentId}
-                onChange={(e) => setParentId(e.target.value)}
-                className="w-full rounded-xl border border-neutral-200 bg-white px-3 py-2.5 text-sm outline-none focus:border-brand"
-              >
-                <option value="">Без родителя — отдельная группа</option>
-                {roots.map((r) => (
-                  <option key={r.id} value={r.id}>
-                    {r.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
 
           <div className="mb-4">
             <span className="mb-2 block text-xs text-neutral-500">Иконка</span>

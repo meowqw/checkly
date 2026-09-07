@@ -7,7 +7,14 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.sql import ColumnElement
 
 from app.core.enums import TransactionType
-from app.database.models import Account, Category, Transaction, TransactionItem, UserAccount
+from app.database.models import (
+    Account,
+    Category,
+    Transaction,
+    TransactionItem,
+    TransactionItemTag,
+    UserAccount,
+)
 
 
 class TransactionRepository:
@@ -21,14 +28,56 @@ class TransactionRepository:
             select(UserAccount.account_id).where(UserAccount.user_id == user_id)
         )
 
+    @staticmethod
+    def _item_match_exists(
+        *,
+        category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
+    ):
+        """EXISTS позиция транзакции, удовлетворяющая фильтрам category/tag."""
+        conds = [TransactionItem.transaction_id == Transaction.id]
+        if category_ids is not None:
+            conds.append(TransactionItem.category_id.in_(category_ids))
+        if tag_ids is not None:
+            conds.append(
+                exists(
+                    select(TransactionItemTag.item_id).where(
+                        TransactionItemTag.item_id == TransactionItem.id,
+                        TransactionItemTag.tag_id.in_(tag_ids),
+                    )
+                )
+            )
+        return exists(select(TransactionItem.id).where(*conds))
+
+    def _apply_item_filters(
+        self,
+        stmt: Any,
+        *,
+        category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> Any:
+        if category_ids is None and tag_ids is None:
+            return stmt
+        return stmt.where(
+            self._item_match_exists(category_ids=category_ids, tag_ids=tag_ids)
+        )
+
+    @staticmethod
+    def _tx_list_options():
+        return (
+            selectinload(Transaction.account),
+            selectinload(Transaction.merchant),
+            selectinload(Transaction.items).selectinload(TransactionItem.category),
+            selectinload(Transaction.items).selectinload(TransactionItem.tags),
+        )
+
     def get_by_uid_for_user(self, uid: str, user_id: int) -> Transaction | None:
         return self._db.scalar(
             select(Transaction)
             .options(
                 selectinload(Transaction.merchant),
-                selectinload(Transaction.items).selectinload(TransactionItem.category).selectinload(
-                    Category.parent
-                ),
+                selectinload(Transaction.items).selectinload(TransactionItem.category),
+                selectinload(Transaction.items).selectinload(TransactionItem.tags),
                 selectinload(Transaction.items).selectinload(TransactionItem.product),
             )
             .where(Transaction.uid == uid, self._accessible_account_ids(user_id))
@@ -42,6 +91,7 @@ class TransactionRepository:
         transaction_type: str | None = None,
         account_id: int | None = None,
         category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         *,
         limit: int | None = None,
         offset: int = 0,
@@ -54,24 +104,8 @@ class TransactionRepository:
             transaction_type=transaction_type,
             account_id=account_id,
         )
-        if category_ids is not None:
-            has_matching_item = exists(
-                select(TransactionItem.id).where(
-                    TransactionItem.transaction_id == Transaction.id,
-                    TransactionItem.category_id.in_(category_ids),
-                )
-            )
-            stmt = stmt.where(has_matching_item)
-        stmt = (
-            stmt.options(
-                selectinload(Transaction.account),
-                selectinload(Transaction.merchant),
-                selectinload(Transaction.items)
-                .selectinload(TransactionItem.category)
-                .selectinload(Category.parent),
-            )
-            .order_by(Transaction.occurred_at.desc())
-        )
+        stmt = self._apply_item_filters(stmt, category_ids=category_ids, tag_ids=tag_ids)
+        stmt = stmt.options(*self._tx_list_options()).order_by(Transaction.occurred_at.desc())
         if offset:
             stmt = stmt.offset(offset)
         if limit is not None:
@@ -86,6 +120,7 @@ class TransactionRepository:
         transaction_type: str | None = None,
         account_id: int | None = None,
         category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
     ) -> int:
         stmt = (
             select(func.count())
@@ -99,14 +134,7 @@ class TransactionRepository:
             transaction_type=transaction_type,
             account_id=account_id,
         )
-        if category_ids is not None:
-            has_matching_item = exists(
-                select(TransactionItem.id).where(
-                    TransactionItem.transaction_id == Transaction.id,
-                    TransactionItem.category_id.in_(category_ids),
-                )
-            )
-            stmt = stmt.where(has_matching_item)
+        stmt = self._apply_item_filters(stmt, category_ids=category_ids, tag_ids=tag_ids)
         return int(self._db.scalar(stmt) or 0)
 
     def list_recent_expenses(
@@ -117,6 +145,7 @@ class TransactionRepository:
         to_date: datetime | None = None,
         account_id: int | None = None,
         category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         limit: int = 8,
     ) -> list[Transaction]:
         stmt = select(Transaction).where(
@@ -129,22 +158,9 @@ class TransactionRepository:
             to_date=to_date,
             account_id=account_id,
         )
-        if category_ids is not None:
-            has_matching_item = exists(
-                select(TransactionItem.id).where(
-                    TransactionItem.transaction_id == Transaction.id,
-                    TransactionItem.category_id.in_(category_ids),
-                )
-            )
-            stmt = stmt.where(has_matching_item)
+        stmt = self._apply_item_filters(stmt, category_ids=category_ids, tag_ids=tag_ids)
         stmt = (
-            stmt.options(
-                selectinload(Transaction.account),
-                selectinload(Transaction.merchant),
-                selectinload(Transaction.items)
-                .selectinload(TransactionItem.category)
-                .selectinload(Category.parent),
-            )
+            stmt.options(*self._tx_list_options())
             .order_by(Transaction.occurred_at.desc())
             .limit(limit)
         )
@@ -175,22 +191,31 @@ class TransactionRepository:
         self,
         user_id: int,
         *,
-        category_ids: list[int],
+        category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
         from_date: datetime | None = None,
         to_date: datetime | None = None,
         account_id: int | None = None,
     ) -> dict[str, int]:
-        """Суммы по типу транзакции, но только позиции с category_id ∈ scope."""
-        if not category_ids:
+        """Суммы по типу транзакции по позициям, попадающим в category/tag фильтр."""
+        if category_ids is None and tag_ids is None:
             return {}
         stmt = (
             select(Transaction.type, func.coalesce(func.sum(TransactionItem.amount), 0))
             .join(Transaction, Transaction.id == TransactionItem.transaction_id)
-            .where(
-                self._accessible_account_ids(user_id),
-                TransactionItem.category_id.in_(category_ids),
-            )
+            .where(self._accessible_account_ids(user_id))
         )
+        if category_ids is not None:
+            stmt = stmt.where(TransactionItem.category_id.in_(category_ids))
+        if tag_ids is not None:
+            stmt = stmt.where(
+                exists(
+                    select(TransactionItemTag.item_id).where(
+                        TransactionItemTag.item_id == TransactionItem.id,
+                        TransactionItemTag.tag_id.in_(tag_ids),
+                    )
+                )
+            )
         stmt = self._apply_filters(
             stmt,
             from_date=from_date,
@@ -209,13 +234,9 @@ class TransactionRepository:
         to_date: datetime | None = None,
         account_id: int | None = None,
         category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
     ) -> list[tuple[int | None, int]]:
-        """Суммы расходов по category_id (None = «Прочее»).
-
-        Правила как в StatsService:
-        - есть позиции → суммируем item.amount по category_id позиции;
-        - нет позиций → весь transaction.amount в «Прочее» (только без фильтра категорий).
-        """
+        """Суммы расходов по category_id (None = «Прочее»)."""
         totals: dict[int | None, int] = {}
 
         items_stmt = (
@@ -231,6 +252,15 @@ class TransactionRepository:
         )
         if category_ids is not None:
             items_stmt = items_stmt.where(TransactionItem.category_id.in_(category_ids))
+        if tag_ids is not None:
+            items_stmt = items_stmt.where(
+                exists(
+                    select(TransactionItemTag.item_id).where(
+                        TransactionItemTag.item_id == TransactionItem.id,
+                        TransactionItemTag.tag_id.in_(tag_ids),
+                    )
+                )
+            )
         items_stmt = self._apply_filters(
             items_stmt,
             from_date=from_date,
@@ -242,20 +272,17 @@ class TransactionRepository:
         for category_id, amount in self._db.execute(items_stmt).all():
             totals[category_id] = totals.get(category_id, 0) + int(amount)
 
-        # «Прочее» без позиций — только в полном stats (без category filter)
-        if category_ids is None:
+        # «Прочее» без позиций — только без category/tag фильтра
+        if category_ids is None and tag_ids is None:
             has_items = exists(
                 select(TransactionItem.id).where(
                     TransactionItem.transaction_id == Transaction.id
                 )
             )
-            orphan_stmt = (
-                select(func.coalesce(func.sum(Transaction.amount), 0))
-                .where(
-                    self._accessible_account_ids(user_id),
-                    Transaction.type == TransactionType.EXPENSE.value,
-                    ~has_items,
-                )
+            orphan_stmt = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                self._accessible_account_ids(user_id),
+                Transaction.type == TransactionType.EXPENSE.value,
+                ~has_items,
             )
             orphan_stmt = self._apply_filters(
                 orphan_stmt,
@@ -269,14 +296,10 @@ class TransactionRepository:
 
         return list(totals.items())
 
-    def get_categories_with_parents(self, category_ids: list[int]) -> dict[int, Category]:
+    def get_categories_by_ids(self, category_ids: list[int]) -> dict[int, Category]:
         if not category_ids:
             return {}
-        stmt = (
-            select(Category)
-            .options(selectinload(Category.parent))
-            .where(Category.id.in_(category_ids))
-        )
+        stmt = select(Category).where(Category.id.in_(category_ids))
         return {c.id: c for c in self._db.scalars(stmt).all()}
 
     def get_item_by_uid_for_user(
@@ -286,7 +309,8 @@ class TransactionRepository:
             select(TransactionItem)
             .join(Transaction, Transaction.id == TransactionItem.transaction_id)
             .options(
-                selectinload(TransactionItem.category).selectinload(Category.parent),
+                selectinload(TransactionItem.category),
+                selectinload(TransactionItem.tags),
                 selectinload(TransactionItem.product),
             )
             .where(

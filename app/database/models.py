@@ -104,20 +104,46 @@ class Category(Base, TimestampMixin):
     user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    parent_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("categories.id", ondelete="SET NULL"), nullable=True, index=True
-    )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     type: Mapped[str] = mapped_column(String(20), nullable=False)
     icon: Mapped[str | None] = mapped_column(String(100), nullable=True)
     color: Mapped[str | None] = mapped_column(String(20), nullable=True)
 
     user: Mapped["User | None"] = relationship("User", back_populates="categories")
-    parent: Mapped["Category | None"] = relationship(
-        "Category", remote_side="Category.id", back_populates="children"  # type: ignore[arg-type]
-    )
-    children: Mapped[list["Category"]] = relationship("Category", back_populates="parent")
     products: Mapped[list["Product"]] = relationship("Product", back_populates="category")
+
+
+class Tag(Base, TimestampMixin):
+    """Независимый тег (не связан с категорией). System: user_id IS NULL."""
+
+    __tablename__ = "tags"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    uid: Mapped[str] = mapped_column(String(36), unique=True, nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    icon: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    color: Mapped[str | None] = mapped_column(String(20), nullable=True)
+
+    user: Mapped["User | None"] = relationship("User")
+    items: Mapped[list["TransactionItem"]] = relationship(
+        "TransactionItem",
+        secondary="transaction_item_tags",
+        back_populates="tags",
+    )
+
+
+class TransactionItemTag(Base):
+    __tablename__ = "transaction_item_tags"
+
+    item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("transaction_items.id", ondelete="CASCADE"), primary_key=True
+    )
+    tag_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
 
 
 class Merchant(Base, TimestampMixin):
@@ -232,6 +258,11 @@ class TransactionItem(Base, TimestampMixin):
     transaction: Mapped["Transaction"] = relationship("Transaction", back_populates="items")
     product: Mapped["Product | None"] = relationship("Product", back_populates="transaction_items")
     category: Mapped["Category | None"] = relationship("Category")
+    tags: Mapped[list["Tag"]] = relationship(
+        "Tag",
+        secondary="transaction_item_tags",
+        back_populates="items",
+    )
 
 
 class UserProductCategoryOverride(Base, TimestampMixin):

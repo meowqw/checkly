@@ -20,12 +20,18 @@ class CategoryBriefDTO(BaseModel):
     name: str = Field(description="Отображаемое имя категории")
 
 
+class TagBriefDTO(BaseModel):
+    id: str = Field(description="UUID тега")
+    name: str = Field(description="Название тега")
+
+
 class TransactionItemBriefDTO(BaseModel):
     id: str | None = Field(default=None, description="UUID позиции чека")
     raw_name: str = Field(description="Название товара из чека")
     amount: int = Field(description="Сумма позиции в копейках")
     category_id: str | None = Field(default=None, description="UUID категории")
     category: CategoryBriefDTO | None = Field(default=None, description="Краткая информация о категории")
+    tags: list[TagBriefDTO] = Field(default_factory=list, description="Теги позиции")
 
 
 class TransactionListItemDTO(BaseModel):
@@ -41,7 +47,7 @@ class TransactionListItemDTO(BaseModel):
     merchant: MerchantBriefDTO | None = Field(default=None, description="Магазин (для чеков)")
     category: str | None = Field(
         default=None,
-        description="Отображаемое имя категории (не UUID), напр. «Продукты › Молочное»",
+        description="Имя категории ручной операции (не UUID)",
     )
     items_count: int = Field(default=0, description="Число позиций в чеке")
     items: list[TransactionItemBriefDTO] | None = Field(
@@ -101,6 +107,7 @@ class TransactionFilterDTO(BaseModel):
     type: TransactionType | None = None
     account_uid: str | None = None
     category_uid: str | None = None
+    tag_uid: str | None = None
     timezone: str = "Europe/Moscow"
     limit: int | None = None
     offset: int = 0
@@ -128,6 +135,10 @@ class UpdateTransactionDTO(BaseModel):
 
 class UpdateTransactionItemRequestDTO(BaseModel):
     category_id: str = Field(description="UUID новой категории для позиции")
+    tag_ids: list[str] | None = Field(
+        default=None,
+        description="Если передано — заменить набор тегов позиции (UUID). null = не менять теги",
+    )
 
 
 class UpdateTransactionItemDTO(BaseModel):
@@ -135,6 +146,7 @@ class UpdateTransactionItemDTO(BaseModel):
     transaction_uid: str
     item_uid: str
     category_uid: str
+    tag_uids: list[str] | None = None
 
 
 class CreateTransactionFromReceiptDTO(BaseModel):

@@ -1,6 +1,7 @@
 import type { Category, Transaction } from "@/api/client";
 import { resolveCategoryColor } from "@/lib/category-icons";
 
+/** Категории нужного типа (плоский список). */
 export function getRootCategories(categories: Category[], type: string): Category[] {
   return categories
     .filter((c) => c.type === type)
@@ -12,57 +13,30 @@ export function getRootCategories(categories: Category[], type: string): Categor
     });
 }
 
-export function getSubcategories(categories: Category[], parentId: string): Category[] {
-  const parent = findCategoryById(categories, parentId);
-  return parent?.children ?? [];
-}
-
 export function findCategoryById(categories: Category[], id: string): Category | null {
-  for (const c of categories) {
-    if (c.id === id) return c;
-    if (c.children?.length) {
-      const found = findCategoryById(c.children, id);
-      if (found) return found;
-    }
-  }
-  return null;
+  return categories.find((c) => c.id === id) ?? null;
 }
 
-/** id → «Родитель › Подкатегория» или только имя */
+/** id → имя категории */
 export function buildCategoryDisplayMap(categories: Category[]): Map<string, string> {
   const map = new Map<string, string>();
-
-  const walk = (list: Category[], parentName?: string) => {
-    for (const c of list) {
-      const label = parentName ? `${parentName} › ${c.name}` : c.name;
-      map.set(c.id, label);
-      if (c.children?.length) walk(c.children, c.name);
-    }
-  };
-
-  walk(categories);
+  for (const c of categories) {
+    map.set(c.id, c.name);
+  }
   return map;
 }
 
-/** id и display label → hex цвет категории */
+/** id и name → hex цвет категории */
 export function buildCategoryColorMap(categories: Category[]): Map<string, string> {
   const map = new Map<string, string>();
-
-  const walk = (list: Category[], parentName?: string) => {
-    for (const c of list) {
-      const label = parentName ? `${parentName} › ${c.name}` : c.name;
-      const color = resolveCategoryColor(c.color, c.name);
-      map.set(c.id, color);
-      map.set(label, color);
-      if (c.children?.length) walk(c.children, c.name);
-    }
-  };
-
-  walk(categories);
+  for (const c of categories) {
+    const color = resolveCategoryColor(c.color, c.name);
+    map.set(c.id, color);
+    map.set(c.name, color);
+  }
   return map;
 }
 
-/** Для статистики: подкатегория → родитель, иначе корень */
 export function getCategoryGroupName(
   categoryId: string | null | undefined,
   displayMap: Map<string, string>

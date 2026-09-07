@@ -103,26 +103,16 @@ def _adjust_balance(account: Account, tx_type: str, amount: int) -> None:
 
 
 def _find_system_category(
-    repo: CategoryRepository, name: str, parent_name: str | None, cat_type: str
+    repo: CategoryRepository, name: str, cat_type: str
 ) -> Category | None:
-    parent_id = None
-    if parent_name:
-        parent = repo.find_system_by_name_and_type(parent_name, cat_type, None)
-        if not parent:
-            return None
-        parent_id = parent.id
-        return repo.find_system_by_name_and_type(name, cat_type, parent_id)
-    return repo.find_system_by_name_and_type(name, cat_type, None)
+    return repo.find_system_by_name_and_type(name, cat_type)
 
 
 def _resolve_category(
     repo: CategoryRepository, parent: str, child: str | None, cat_type: str
 ) -> Category | None:
-    if child:
-        found = _find_system_category(repo, child, parent, cat_type)
-        if found:
-            return found
-    return _find_system_category(repo, parent, None, cat_type)
+    # child раньше был подкатегорией — теперь игнорируем, категория плоская
+    return _find_system_category(repo, parent, cat_type)
 
 
 def _wipe_demo_users(db) -> int:
@@ -245,7 +235,6 @@ def _seed_user(
         custom = Category(
             uid=new_uid(),
             user_id=user.id,
-            parent_id=None,
             name="Хобби (своя)",
             type=CategoryType.EXPENSE.value,
             icon="palette",

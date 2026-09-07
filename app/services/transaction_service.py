@@ -53,10 +53,12 @@ from app.repositories.category_repository import CategoryRepository
 from app.repositories.merchant_repository import MerchantRepository
 from app.repositories.product_repository import ProductRepository
 from app.repositories.receipt_repository import ReceiptRepository
+from app.repositories.tag_repository import TagRepository
 from app.repositories.transaction_repository import TransactionRepository
 from app.repositories.user_product_override_repository import UserProductCategoryOverrideRepository
 from app.services.category_service import CategoryService
 from app.services.product_matching_service import ProductMatchingService
+from app.services.tag_service import TagService
 from app.services.transaction_mapper import map_item_to_brief, map_transaction_to_list_item
 from app.services.transaction_queries import (
     list_transactions_for_filters,
@@ -80,12 +82,14 @@ class TransactionService:
         self._transactions = TransactionRepository(db)
         self._accounts = AccountRepository(db)
         self._categories = CategoryRepository(db)
+        self._tags = TagRepository(db)
         self._merchants = MerchantRepository(db)
         self._products = ProductRepository(db)
         self._receipts = ReceiptRepository(db)
         self._overrides = UserProductCategoryOverrideRepository(db)
         self._matching = ProductMatchingService(db)
         self._category_service = CategoryService(db)
+        self._tag_service = TagService(db)
         self._receipt_provider = receipt_provider or ProverkachekaReceiptProvider()
         self._product_normalizer = product_normalizer or get_product_normalizer()
 
@@ -93,7 +97,10 @@ class TransactionService:
         # Без limit — прежнее поведение: весь список по фильтру (фронт не ломаем)
         if filters.limit is None:
             rows = list_transactions_for_filters(
-                self._transactions, filters, categories=self._categories
+                self._transactions,
+                filters,
+                categories=self._categories,
+                tags=self._tags,
             )
             return TransactionsListResponseDTO(
                 transactions=[map_transaction_to_list_item(t) for t in rows]
@@ -104,7 +111,10 @@ class TransactionService:
         paginated = filters.model_copy(update={"limit": limit, "offset": offset})
 
         resolved = resolve_transaction_filters(
-            self._transactions, paginated, categories=self._categories
+            self._transactions,
+            paginated,
+            categories=self._categories,
+            tags=self._tags,
         )
         total = self._transactions.count_for_user(
             resolved.user_id,
@@ -113,9 +123,13 @@ class TransactionService:
             transaction_type=resolved.transaction_type,
             account_id=resolved.account_id,
             category_ids=resolved.category_ids,
+            tag_ids=resolved.tag_ids,
         )
         rows = list_transactions_for_filters(
-            self._transactions, paginated, categories=self._categories
+            self._transactions,
+            paginated,
+            categories=self._categories,
+            tags=self._tags,
         )
         return TransactionsListResponseDTO(
             transactions=[map_transaction_to_list_item(t) for t in rows],
@@ -226,6 +240,9 @@ class TransactionService:
         if item.product_id:
             self._overrides.upsert(dto.user_id, item.product_id, category.id)
 
+        if dto.tag_uids is not None:
+            item.tags = self._tag_service.resolve_tags_for_user(dto.user_id, dto.tag_uids)
+
         self._db.commit()
         self._db.refresh(transaction)
         return TransactionResponseDTO(transaction=self._to_detail_dto(transaction))
@@ -327,9 +344,8 @@ class TransactionService:
             category = None
             product = created_products.get(item.raw_name)
             if norm and product is None:
-                category = self._category_service.find_system_for_receipt(
-                    norm.category, norm.subcategory
-                )
+                category = self._category_service.find_system_for_receipt(norm.category)
+                tags = self._tag_service.resolve_system_tags(norm.tags)
                 product = Product(
                     uid=new_uid(),
                     name=norm.product_name,
@@ -351,6 +367,9 @@ class TransactionService:
                 created_products[item.raw_name] = product
             elif norm and product is not None:
                 category = self._db.get(Category, product.category_id) if product.category_id else None
+                tags = self._tag_service.resolve_system_tags(norm.tags)
+            else:
+                tags = []
 
             tx_item = self._create_transaction_item(
                 transaction_id=transaction.id,
@@ -360,6 +379,7 @@ class TransactionService:
                 amount=item.amount,
                 product=product,
                 category_id=category.id if category else None,
+                tags=tags,
             )
             response_items.append(map_item_to_brief(tx_item, category))
 
@@ -424,7 +444,7 @@ class TransactionService:
                     product_name=item.raw_name,
                     brand=None,
                     category="Прочее",
-                    subcategory=None,
+                    tags=[],
                     confidence=0.0,
                 )
                 for item in unknown_items
@@ -456,6 +476,7 @@ class TransactionService:
         amount: int,
         product: Product | None,
         category_id: int | None,
+        tags: list | None = None,
     ) -> TransactionItem:
         item = TransactionItem(
             uid=new_uid(),
@@ -467,7 +488,11 @@ class TransactionService:
             price=price,
             amount=amount,
         )
-        return self._transactions.create_item(item)
+        created = self._transactions.create_item(item)
+        if tags:
+            created.tags = list(tags)
+            self._db.flush()
+        return created
 
     def _adjust_account_balance(
         self, account_id: int, transaction_type: TransactionType, amount: int

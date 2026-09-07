@@ -23,6 +23,7 @@ export async function getCacheEntry<T>(key: string): Promise<CacheEntry<T> | nul
 
 const ACCOUNTS_KEY = "accounts";
 const CATEGORIES_KEY = "categories";
+const TAGS_KEY = "tags";
 
 export function transactionsCacheKey(params?: Record<string, string>): string {
   return `transactions:${JSON.stringify(params ?? {})}`;
@@ -42,6 +43,14 @@ export async function cacheCategories(categories: Category[]) {
 
 export async function readCategoriesCache(): Promise<Category[] | null> {
   return getCache<Category[]>(CATEGORIES_KEY);
+}
+
+export async function cacheTags(tags: import("@/api/client").Tag[]) {
+  await setCache(TAGS_KEY, tags);
+}
+
+export async function readTagsCache(): Promise<import("@/api/client").Tag[] | null> {
+  return getCache(TAGS_KEY);
 }
 
 export async function cacheTransactions(params: Record<string, string> | undefined, txs: Transaction[]) {
@@ -119,11 +128,36 @@ export async function mergeTransactions(
 
   const typeFilter = params?.type;
   const accountFilter = params?.account_id;
+  const categoryFilter = params?.category_id;
+
+  let categoryScope: Set<string> | null = null;
+  if (categoryFilter) {
+    categoryScope = new Set([categoryFilter]);
+  }
+
+  const matchesCategory = (t: Transaction): boolean => {
+    if (!categoryScope) return true;
+    const items = t.items;
+    if (items?.length) {
+      return items.some((it) => it.category_id && categoryScope!.has(it.category_id));
+    }
+    return false;
+  };
+
+  const tagFilter = params?.tag_id;
+  const matchesTag = (t: Transaction): boolean => {
+    if (!tagFilter) return true;
+    const items = t.items;
+    if (!items?.length) return false;
+    return items.some((it) => (it.tags ?? []).some((tag) => tag.id === tagFilter));
+  };
 
   const localFiltered = local.filter((t) => {
     if (hidden.has(t.id)) return false;
     if (typeFilter && t.type !== typeFilter) return false;
     if (accountFilter && t.account?.id !== accountFilter) return false;
+    if (!matchesCategory(t)) return false;
+    if (!matchesTag(t)) return false;
     if (params?.from) {
       const at = parseApiDateTime(t.occurred_at).getTime();
       if (at < parseRangeBound(params.from, "start")) return false;
@@ -136,7 +170,9 @@ export async function mergeTransactions(
   });
 
   const byId = new Map<string, Transaction>();
-  for (const t of filtered) byId.set(t.id, t);
+  for (const t of filtered) {
+    if (matchesCategory(t) && matchesTag(t)) byId.set(t.id, t);
+  }
   for (const t of localFiltered) byId.set(t.id, t);
 
   return [...byId.values()].sort(
@@ -191,6 +227,7 @@ export async function mergeAccounts(server: Account[]): Promise<Account[]> {
         id: op.tempId,
         name: op.body.name,
         balance: op.body.balance,
+        members: [],
       });
     }
   }

@@ -12,7 +12,7 @@ def test_match_by_gtin(db: Session, system_categories: dict[str, Category]) -> N
         name="Молоко",
         normalized_name="Молоко",
         gtin="460111",
-        category_id=system_categories["dairy"].id,
+        category_id=system_categories["products"].id,
     )
     db.add(product)
     db.commit()
@@ -34,7 +34,7 @@ def test_match_by_raw_alias_and_merchant(
         uid=new_uid(),
         name="Чипсы",
         normalized_name="Чипсы",
-        category_id=system_categories["snacks"].id,
+        category_id=system_categories["products"].id,
     )
     db.add(product)
     db.flush()

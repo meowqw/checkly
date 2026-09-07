@@ -9,6 +9,7 @@ from app.database.models import Category
 from app.dto.stats import CategoryStatDTO, StatsResponseDTO
 from app.dto.transactions import TransactionFilterDTO
 from app.repositories.category_repository import CategoryRepository
+from app.repositories.tag_repository import TagRepository
 from app.repositories.transaction_repository import TransactionRepository
 from app.services.transaction_mapper import map_transaction_to_list_item
 from app.services.transaction_queries import resolve_transaction_filters
@@ -21,14 +22,19 @@ class StatsService:
     def __init__(self, db: Session):
         self._transactions = TransactionRepository(db)
         self._categories = CategoryRepository(db)
+        self._tags = TagRepository(db)
 
     def get_stats(self, filters: TransactionFilterDTO) -> StatsResponseDTO:
         resolved = resolve_transaction_filters(
-            self._transactions, filters, categories=self._categories
+            self._transactions,
+            filters,
+            categories=self._categories,
+            tags=self._tags,
         )
         category_ids = resolved.category_ids
+        tag_ids = resolved.tag_ids
 
-        if category_ids is None:
+        if category_ids is None and tag_ids is None:
             sums = self._transactions.sum_amounts_by_type(
                 resolved.user_id,
                 from_date=resolved.from_date,
@@ -39,6 +45,7 @@ class StatsService:
             sums = self._transactions.sum_item_amounts_by_type(
                 resolved.user_id,
                 category_ids=category_ids,
+                tag_ids=tag_ids,
                 from_date=resolved.from_date,
                 to_date=resolved.to_date,
                 account_id=resolved.account_id,
@@ -53,6 +60,7 @@ class StatsService:
             to_date=resolved.to_date,
             account_id=resolved.account_id,
             category_ids=category_ids,
+            tag_ids=tag_ids,
         )
 
         recent_rows = self._transactions.list_recent_expenses(
@@ -61,6 +69,7 @@ class StatsService:
             to_date=resolved.to_date,
             account_id=resolved.account_id,
             category_ids=category_ids,
+            tag_ids=tag_ids,
             limit=RECENT_EXPENSES_LIMIT,
         )
         recent = [map_transaction_to_list_item(t, compact=True) for t in recent_rows]
@@ -80,6 +89,7 @@ class StatsService:
         to_date: datetime | None,
         account_id: int | None,
         category_ids: list[int] | None,
+        tag_ids: list[int] | None,
     ) -> list[CategoryStatDTO]:
         rows = self._transactions.aggregate_expense_category_amounts(
             user_id,
@@ -87,14 +97,14 @@ class StatsService:
             to_date=to_date,
             account_id=account_id,
             category_ids=category_ids,
+            tag_ids=tag_ids,
         )
         if not rows:
             return []
 
         known_ids = [cid for cid, _ in rows if cid is not None]
-        categories_by_id = self._transactions.get_categories_with_parents(known_ids)
+        categories_by_id = self._transactions.get_categories_by_ids(known_ids)
 
-        # Схлопываем по display-name (как раньше: ключ — имя, не id)
         totals: dict[str, tuple[int, str | None, str | None]] = {}
         for category_id, amount in rows:
             name, uid, color = self._category_meta(category_id, categories_by_id)
@@ -128,5 +138,4 @@ class StatsService:
         cat = categories_by_id.get(category_id)
         if not cat:
             return FALLBACK_CATEGORY, None, None
-        color = cat.color or (cat.parent.color if cat.parent else None)
-        return category_display_name(cat) or FALLBACK_CATEGORY, cat.uid, color
+        return category_display_name(cat) or FALLBACK_CATEGORY, cat.uid, cat.color

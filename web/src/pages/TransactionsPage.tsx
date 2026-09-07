@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, ChevronUp } from "lucide-react";
+import { useSearchParams } from "react-router-dom";
+import { ChevronDown, ChevronRight, ChevronUp, X } from "lucide-react";
 import * as data from "@/api/data-service";
-import { formatMoney, type TransactionItem } from "@/api/client";
+import { formatMoney, type Category, type Tag, type TransactionItem } from "@/api/client";
 import { ApiError } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
+import { useSync } from "@/context/SyncContext";
 import { ItemCategorySheet } from "@/components/ItemCategorySheet";
 import { PageHeader } from "@/components/mobile/PageHeader";
 import { PeriodNavigator } from "@/components/mobile/PeriodNavigator";
@@ -15,20 +17,29 @@ import { trackBackgroundFresh } from "@/lib/cache-first";
 import { getPeriodRange, toApiDateTimeRange, type Period } from "@/lib/dates";
 import { subscribeTransactionsChanged } from "@/lib/data-events";
 import { groupByDate, sourceLabel, type TransactionListItem } from "@/lib/transactions";
-import { buildCategoryColorMap, resolveTransactionDotColor } from "@/lib/categories";
+import { buildCategoryColorMap, findCategoryById, resolveTransactionDotColor } from "@/lib/categories";
 import { cn } from "@/lib/utils";
 
+const PAGE_SIZE = 40;
+
 export default function TransactionsPage() {
+  const { online } = useSync();
   const { accounts } = useAccounts();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState<Period>("month");
   const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
   const [transactions, setTransactions] = useState<TransactionListItem[]>([]);
-  const [categoryTree, setCategoryTree] = useState<Awaited<ReturnType<typeof data.getCategories>>["categories"]>([]);
+  const [categoryTree, setCategoryTree] = useState<Category[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [type, setType] = useState<"" | "expense" | "income">("");
   const [accountId, setAccountId] = useState("");
+  const [categoryId, setCategoryId] = useState(() => searchParams.get("category_id") ?? "");
+  const [tagId, setTagId] = useState(() => searchParams.get("tag_id") ?? "");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [booting, setBooting] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const hasEverLoaded = useRef(false);
   const [editItem, setEditItem] = useState<{
@@ -39,12 +50,60 @@ export default function TransactionsPage() {
 
   const range = useMemo(() => getPeriodRange(period, periodAnchor), [period, periodAnchor.getTime()]);
 
-  const queryParams = useMemo(() => {
+  const baseParams = useMemo(() => {
     const params: Record<string, string> = toApiDateTimeRange(range.from, range.to);
     if (type) params.type = type;
     if (accountId) params.account_id = accountId;
+    if (categoryId) params.category_id = categoryId;
+    if (tagId) params.tag_id = tagId;
     return params;
-  }, [range.from.getTime(), range.to.getTime(), type, accountId]);
+  }, [range.from.getTime(), range.to.getTime(), type, accountId, categoryId, tagId]);
+
+  const pageParams = useCallback(
+    (offset: number) => {
+      if (!online) return baseParams;
+      return {
+        ...baseParams,
+        limit: String(PAGE_SIZE),
+        offset: String(offset),
+      };
+    },
+    [baseParams, online]
+  );
+
+  const syncCategoryToUrl = (id: string) => {
+    setCategoryId(id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (id) next.set("category_id", id);
+        else next.delete("category_id");
+        return next;
+      },
+      { replace: true }
+    );
+  };
+
+  const syncTagToUrl = (id: string) => {
+    setTagId(id);
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (id) next.set("tag_id", id);
+        else next.delete("tag_id");
+        return next;
+      },
+      { replace: true }
+    );
+  };
+
+  useEffect(() => {
+    const fromUrl = searchParams.get("category_id") ?? "";
+    if (fromUrl !== categoryId) setCategoryId(fromUrl);
+    const tagFromUrl = searchParams.get("tag_id") ?? "";
+    if (tagFromUrl !== tagId) setTagId(tagFromUrl);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const reload = useCallback(
     (skipRevalidate = false) =>
@@ -53,16 +112,20 @@ export default function TransactionsPage() {
         setError("");
 
         try {
-          const [txRes, catRes] = await Promise.all([
-            data.getTransactions(queryParams, { skipRevalidate }),
-            data.getCategories(true, { skipRevalidate }),
+          const params = pageParams(0);
+          const [txRes, catRes, tagRes] = await Promise.all([
+            data.getTransactions(params, { skipRevalidate }),
+            data.getCategories({ skipRevalidate }),
+            data.getTags({ skipRevalidate }),
           ]);
           setTransactions(txRes.transactions as TransactionListItem[]);
           setCategoryTree(catRes.categories);
+          setTags(tagRes.tags);
+          setHasMore(Boolean(txRes.has_more));
           hasEverLoaded.current = true;
           setBooting(false);
           if (!skipRevalidate) {
-            trackBackgroundFresh([txRes, catRes], setRefreshing);
+            trackBackgroundFresh([txRes, catRes, tagRes], setRefreshing);
           }
         } catch (err) {
           if (!hasEverLoaded.current) {
@@ -71,8 +134,26 @@ export default function TransactionsPage() {
           }
         }
       })(),
-    [queryParams]
+    [pageParams]
   );
+
+  const loadMore = async () => {
+    if (!online || loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await data.getTransactions(pageParams(transactions.length), { skipRevalidate: true });
+      setTransactions((prev) => {
+        const seen = new Set(prev.map((t) => t.id));
+        const appended = (res.transactions as TransactionListItem[]).filter((t) => !seen.has(t.id));
+        return [...prev, ...appended];
+      });
+      setHasMore(Boolean(res.has_more));
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Не удалось догрузить");
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +168,16 @@ export default function TransactionsPage() {
   }, [reload]);
 
   const colorMap = useMemo(() => buildCategoryColorMap(categoryTree), [categoryTree]);
+
+  const categoryFilterLabel = useMemo(() => {
+    if (!categoryId) return null;
+    return findCategoryById(categoryTree, categoryId)?.name ?? "Категория";
+  }, [categoryId, categoryTree]);
+
+  const tagFilterLabel = useMemo(() => {
+    if (!tagId) return null;
+    return tags.find((t) => t.id === tagId)?.name ?? "Тег";
+  }, [tagId, tags]);
 
   const grouped = useMemo(() => groupByDate(transactions), [transactions]);
 
@@ -153,31 +244,82 @@ export default function TransactionsPage() {
         className="mb-1"
       />
 
-      <div className="mb-4 overflow-x-auto overscroll-x-contain scrollbar-none">
+      <div className="mb-3 overflow-x-auto overscroll-x-contain scrollbar-none">
         <div className="flex w-max min-w-full gap-1.5 pb-1">
-        <FilterChip active={type === ""} onClick={() => setType("")}>
-          Все
-        </FilterChip>
-        <FilterChip active={type === "expense"} onClick={() => setType("expense")}>
-          Расходы
-        </FilterChip>
-        <FilterChip active={type === "income"} onClick={() => setType("income")}>
-          Доходы
-        </FilterChip>
-        {accounts.length > 1 && (
-          <>
-            <span className="mx-0.5 w-px shrink-0 self-center bg-neutral-200" />
-            <FilterChip active={accountId === ""} onClick={() => setAccountId("")}>
-              Все счета
-            </FilterChip>
-            {accounts.map((a) => (
-              <FilterChip key={a.id} active={accountId === a.id} onClick={() => setAccountId(a.id)}>
-                {a.name}
+          <FilterChip active={type === ""} onClick={() => setType("")}>
+            Все
+          </FilterChip>
+          <FilterChip active={type === "expense"} onClick={() => setType("expense")}>
+            Расходы
+          </FilterChip>
+          <FilterChip active={type === "income"} onClick={() => setType("income")}>
+            Доходы
+          </FilterChip>
+          {accounts.length > 1 && (
+            <>
+              <span className="mx-0.5 w-px shrink-0 self-center bg-neutral-200" />
+              <FilterChip active={accountId === ""} onClick={() => setAccountId("")}>
+                Все счета
               </FilterChip>
-            ))}
-          </>
-        )}
+              {accounts.map((a) => (
+                <FilterChip key={a.id} active={accountId === a.id} onClick={() => setAccountId(a.id)}>
+                  {a.name}
+                </FilterChip>
+              ))}
+            </>
+          )}
         </div>
+      </div>
+
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">Категория</span>
+          <select
+            className="input-field py-2 text-xs"
+            value={categoryId}
+            onChange={(e) => syncCategoryToUrl(e.target.value)}
+          >
+            <option value="">Все категории</option>
+            {categoryTree
+              .filter((c) => !type || c.type === type)
+              .map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+          </select>
+        </label>
+        <label className="min-w-0 flex-1">
+          <span className="sr-only">Тег</span>
+          <select
+            className="input-field py-2 text-xs"
+            value={tagId}
+            onChange={(e) => syncTagToUrl(e.target.value)}
+          >
+            <option value="">Все теги</option>
+            {tags.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        {(categoryId || tagId) && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="shrink-0 gap-1 text-neutral-500"
+            onClick={() => {
+              syncCategoryToUrl("");
+              syncTagToUrl("");
+            }}
+            aria-label="Сбросить фильтры"
+          >
+            <X size={14} />
+            {[categoryFilterLabel, tagFilterLabel].filter(Boolean).join(" · ")}
+          </Button>
+        )}
       </div>
 
       <RefreshBar active={refreshing} />
@@ -210,6 +352,17 @@ export default function TransactionsPage() {
               </div>
             </section>
           ))}
+          {online && hasMore && (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              disabled={loadingMore}
+              onClick={() => void loadMore()}
+            >
+              {loadingMore ? "Загрузка..." : "Показать ещё"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -309,6 +462,11 @@ function TransactionRow({
                   <span className="flex shrink-0 items-center gap-1">
                     {item.category?.name && (
                       <span className="max-w-[100px] truncate text-[10px] text-brand">{item.category.name}</span>
+                    )}
+                    {(item.tags ?? []).length > 0 && (
+                      <span className="max-w-[80px] truncate text-[10px] text-neutral-400">
+                        {(item.tags ?? []).map((t) => t.name).join(", ")}
+                      </span>
                     )}
                     <span className="font-medium tabular-nums">{formatMoney(item.amount)}</span>
                     <ChevronRight size={12} className="text-neutral-300" />

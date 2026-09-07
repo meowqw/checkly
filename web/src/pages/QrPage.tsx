@@ -19,6 +19,7 @@ export default function QrPage() {
   const [accountId, setAccountId] = useState("");
   const [qr, setQr] = useState("");
   const [error, setError] = useState("");
+  const [errorKind, setErrorKind] = useState<"error" | "duplicate">("error");
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -36,13 +37,20 @@ export default function QrPage() {
         return;
       }
       setError("");
+      setErrorKind("error");
       setResult(null);
       setLoading(true);
       try {
         const res = await data.scanQr({ account_id: accountId, qr: qrPayload.trim() });
         setResult(res.transaction);
       } catch (err) {
-        setError(err instanceof ApiError ? err.message : "Ошибка");
+        if (err instanceof ApiError && err.status === 409) {
+          setErrorKind("duplicate");
+          setError(err.message || "Этот чек уже добавлен");
+        } else {
+          setErrorKind("error");
+          setError(err instanceof ApiError ? err.message : "Ошибка");
+        }
       } finally {
         setLoading(false);
       }
@@ -61,6 +69,7 @@ export default function QrPage() {
       return;
     }
     setError("");
+    setErrorKind("error");
     if (isNativeApp()) {
       setScanning(true);
       try {
@@ -104,9 +113,20 @@ export default function QrPage() {
       )}
 
       {error && (
-        <p className="mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
+        <div
+          className={
+            errorKind === "duplicate"
+              ? "mb-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+              : "mb-3 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
+          }
+        >
+          <p>{error}</p>
+          {errorKind === "duplicate" && (
+            <Link to="/transactions" className="mt-1 inline-block text-xs font-medium text-amber-950 underline">
+              Открыть операции
+            </Link>
+          )}
+        </div>
       )}
 
       {!accountsLoading && accounts.length === 0 ? (
@@ -186,6 +206,11 @@ export default function QrPage() {
                     {item.category?.name && (
                       <Badge className="mt-1">{item.category.name}</Badge>
                     )}
+                    {(item.tags ?? []).map((t) => (
+                      <Badge key={t.id} className="mt-1 ml-1 bg-neutral-100 text-neutral-600">
+                        {t.name}
+                      </Badge>
+                    ))}
                   </span>
                   <span className="flex shrink-0 items-center gap-1 text-sm font-semibold tabular-nums">
                     {formatMoney(item.amount)}

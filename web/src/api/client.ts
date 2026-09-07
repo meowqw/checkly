@@ -123,11 +123,15 @@ export const api = {
     }),
   deleteAccount: (id: string) =>
     request<{ success: boolean }>(`/v1/accounts/${id}`, { method: "DELETE" }),
+  createAccountInvite: (accountId: string) =>
+    request<{ token: string }>(`/v1/accounts/${accountId}/invites`, { method: "POST" }),
+  joinAccount: (body: { token: string }) =>
+    request<{ account: Account }>("/v1/accounts/join", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
 
-  categories: (includeChildren = true) =>
-    request<{ categories: Category[] }>(
-      `/v1/categories?include=${includeChildren ? "children" : ""}`
-    ),
+  categories: () => request<{ categories: Category[] }>("/v1/categories"),
 
   createCategory: (body: CreateCategoryBody) =>
     request<{ category: Category }>("/v1/categories", {
@@ -144,9 +148,18 @@ export const api = {
   deleteCategory: (id: string) =>
     request<{ success: boolean }>(`/v1/categories/${id}`, { method: "DELETE" }),
 
+  tags: () => request<{ tags: Tag[] }>("/v1/tags"),
+  createTag: (body: CreateTagBody) =>
+    request<{ tag: Tag }>("/v1/tags", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  deleteTag: (id: string) =>
+    request<{ success: boolean }>(`/v1/tags/${id}`, { method: "DELETE" }),
+
   transactions: (params?: Record<string, string>) => {
     const q = params ? "?" + new URLSearchParams(params).toString() : "";
-    return request<{ transactions: Transaction[] }>(`/v1/transactions${q}`);
+    return request<TransactionsListResponse>(`/v1/transactions${q}`);
   },
   transaction: (id: string) =>
     request<{ transaction: TransactionDetail }>(`/v1/transactions/${id}`),
@@ -161,7 +174,7 @@ export const api = {
   updateTransactionItem: (
     transactionId: string,
     itemId: string,
-    body: { category_id: string }
+    body: { category_id: string; tag_ids?: string[] }
   ) =>
     request<{ transaction: TransactionDetail }>(
       `/v1/transactions/${transactionId}/items/${itemId}`,
@@ -195,23 +208,47 @@ export type PeriodStats = {
   recent_expenses: Transaction[];
 };
 
-export type Account = { id: string; name: string; balance: number };
+export type AccountMemberRole = "owner" | "member";
+
+export type AccountMember = {
+  id: string;
+  login: string;
+  role: AccountMemberRole | string;
+};
+
+export type Account = {
+  id: string;
+  name: string;
+  balance: number;
+  members?: AccountMember[];
+};
+
+/** Роль текущего пользователя на счёте; без members — считаем owner (локальный/legacy кэш). */
+export function myAccountRole(account: Account, userId: string | undefined): AccountMemberRole | null {
+  if (!userId) return null;
+  const members = account.members;
+  if (!members?.length) return "owner";
+  const mine = members.find((m) => m.id === userId);
+  if (!mine) return null;
+  return mine.role === "owner" ? "owner" : "member";
+}
+
+export function isAccountOwner(account: Account, userId: string | undefined): boolean {
+  return myAccountRole(account, userId) === "owner";
+}
 
 export type Category = {
   id: string;
   name: string;
   type: string;
-  parent_id?: string | null;
   icon?: string | null;
   color?: string | null;
   is_custom?: boolean;
-  children?: Category[];
 };
 
 export type CreateCategoryBody = {
   name: string;
   type: "expense" | "income";
-  parent_id?: string;
   icon?: string;
   color?: string;
 };
@@ -220,6 +257,25 @@ export type UpdateCategoryBody = {
   name?: string;
   icon?: string;
   color?: string;
+};
+
+export type Tag = {
+  id: string;
+  name: string;
+  icon?: string | null;
+  color?: string | null;
+  is_custom?: boolean;
+};
+
+export type CreateTagBody = {
+  name: string;
+  icon?: string;
+  color?: string;
+};
+
+export type TagBrief = {
+  id: string;
+  name: string;
 };
 
 export type Transaction = {
@@ -238,12 +294,22 @@ export type Transaction = {
   items?: TransactionItem[];
 };
 
+/** Ответ списка: без limit — только transactions; с limit — + meta пагинации. */
+export type TransactionsListResponse = {
+  transactions: Transaction[];
+  total?: number;
+  limit?: number;
+  offset?: number;
+  has_more?: boolean;
+};
+
 export type TransactionItem = {
   id?: string;
   raw_name: string;
   amount: number;
   category_id?: string | null;
   category?: { name: string };
+  tags?: TagBrief[];
 };
 
 export type TransactionDetail = Transaction & {
@@ -272,16 +338,4 @@ export function formatMoney(kopecks: number): string {
 
 export function rublesToKopecks(rubles: number): number {
   return Math.round(rubles * 100);
-}
-
-export function flattenCategories(cats: Category[]): Category[] {
-  const out: Category[] = [];
-  const walk = (list: Category[]) => {
-    for (const c of list) {
-      out.push(c);
-      if (c.children?.length) walk(c.children);
-    }
-  };
-  walk(cats);
-  return out;
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, ScanLine } from "lucide-react";
 import * as data from "@/api/data-service";
 import { formatMoney, type CategoryStat, type PeriodStats } from "@/api/client";
@@ -32,6 +32,7 @@ type TxRowData = {
 const CATEGORY_PREVIEW = 5;
 
 export default function DashboardPage() {
+  const navigate = useNavigate();
   const { accounts, loading: accountsLoading } = useAccounts();
   const [period, setPeriod] = useState<Period>("day");
   const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
@@ -202,11 +203,16 @@ export default function DashboardPage() {
           <div className="space-y-3 stagger-in">
             {visibleCategories.map((c) => (
               <CategoryProgress
-                key={c.name}
+                key={`${c.category_id ?? "none"}:${c.name}`}
                 name={c.name}
                 amount={formatStatAmount(c.amount)}
                 percent={c.percent}
                 color={c.color ?? undefined}
+                onClick={
+                  c.category_id
+                    ? () => navigate(`/transactions?category_id=${encodeURIComponent(c.category_id!)}`)
+                    : undefined
+                }
               />
             ))}
           </div>

@@ -49,7 +49,7 @@ class FakeProductNormalizer(ProductNormalizerInterface):
                     product_name=item.raw_name.title(),
                     brand=None,
                     category="Продукты",
-                    subcategory="Молочные",
+                    tags=["Молочные"],
                     confidence=0.9,
                 )
                 for item in dto.items

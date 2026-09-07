@@ -28,7 +28,7 @@ def test_transactions_api_crud(
             "amount": 750_00,
             "currency": "RUB",
             "occurred_at": "2026-06-15T14:00:00",
-            "category_id": system_categories["dairy"].uid,
+            "category_id": system_categories["products"].uid,
             "comment": "Молоко",
         },
     )

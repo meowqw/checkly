@@ -129,29 +129,15 @@ def account(db: Session, user: User) -> Account:
 
 @pytest.fixture()
 def system_categories(db: Session) -> dict[str, Category]:
-    """Минимальное дерево системных категорий для тестов."""
+    """Плоские системные категории + теги для тестов."""
+    from app.database.models import Tag
+
     products = Category(
         uid=new_uid(),
         user_id=None,
         name="Продукты",
         type=CategoryType.EXPENSE.value,
         color="#16a34a",
-    )
-    db.add(products)
-    db.flush()
-    dairy = Category(
-        uid=new_uid(),
-        user_id=None,
-        parent_id=products.id,
-        name="Молочные",
-        type=CategoryType.EXPENSE.value,
-    )
-    snacks = Category(
-        uid=new_uid(),
-        user_id=None,
-        parent_id=products.id,
-        name="Снэки",
-        type=CategoryType.EXPENSE.value,
     )
     other = Category(
         uid=new_uid(),
@@ -167,16 +153,18 @@ def system_categories(db: Session) -> dict[str, Category]:
         type=CategoryType.INCOME.value,
         color="#16a34a",
     )
-    db.add_all([dairy, snacks, other, salary])
+    dairy = Tag(uid=new_uid(), user_id=None, name="Молочные")
+    snacks = Tag(uid=new_uid(), user_id=None, name="Снэки")
+    db.add_all([products, other, salary, dairy, snacks])
     db.commit()
-    for c in (products, dairy, snacks, other, salary):
+    for c in (products, other, salary, dairy, snacks):
         db.refresh(c)
     return {
         "products": products,
-        "dairy": dairy,
-        "snacks": snacks,
         "other": other,
         "salary": salary,
+        "dairy": dairy,
+        "snacks": snacks,
     }
 
 
@@ -188,6 +176,7 @@ def make_manual_tx(
     amount: int,
     tx_type: str = TransactionType.EXPENSE.value,
     category: Category | None = None,
+    tags: list | None = None,
     occurred_at: datetime | None = None,
     comment: str = "тест",
 ) -> Transaction:
@@ -204,15 +193,17 @@ def make_manual_tx(
     )
     db.add(tx)
     db.flush()
-    db.add(
-        TransactionItem(
-            uid=new_uid(),
-            transaction_id=tx.id,
-            category_id=category.id if category else None,
-            raw_name=comment,
-            amount=amount,
-        )
+    item = TransactionItem(
+        uid=new_uid(),
+        transaction_id=tx.id,
+        category_id=category.id if category else None,
+        raw_name=comment,
+        amount=amount,
     )
+    db.add(item)
+    db.flush()
+    if tags:
+        item.tags = list(tags)
     db.commit()
     db.refresh(tx)
     return tx
@@ -223,11 +214,12 @@ def make_qr_tx(
     *,
     user: User,
     account: Account,
-    items: list[tuple[str, int, Category | None]],
+    items: list[tuple],
     occurred_at: datetime | None = None,
     product: Product | None = None,
 ) -> Transaction:
-    total = sum(amount for _, amount, _ in items)
+    """items: (raw_name, amount, category) или (raw_name, amount, category, tags)."""
+    total = sum(row[1] for row in items)
     tx = Transaction(
         uid=new_uid(),
         user_id=user.id,
@@ -241,17 +233,21 @@ def make_qr_tx(
     )
     db.add(tx)
     db.flush()
-    for raw_name, amount, category in items:
-        db.add(
-            TransactionItem(
-                uid=new_uid(),
-                transaction_id=tx.id,
-                product_id=product.id if product else None,
-                category_id=category.id if category else None,
-                raw_name=raw_name,
-                amount=amount,
-            )
+    for row in items:
+        raw_name, amount, category = row[0], row[1], row[2]
+        tags = row[3] if len(row) > 3 else None
+        item = TransactionItem(
+            uid=new_uid(),
+            transaction_id=tx.id,
+            product_id=product.id if product else None,
+            category_id=category.id if category else None,
+            raw_name=raw_name,
+            amount=amount,
         )
+        db.add(item)
+        db.flush()
+        if tags:
+            item.tags = list(tags)
     db.commit()
     db.refresh(tx)
     return tx

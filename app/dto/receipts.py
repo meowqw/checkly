@@ -72,7 +72,7 @@ class NormalizedItemDTO(BaseModel):
     product_name: str
     brand: str | None = None
     category: str
-    subcategory: str | None = None
+    tags: list[str] = Field(default_factory=list)
     confidence: float
 
 

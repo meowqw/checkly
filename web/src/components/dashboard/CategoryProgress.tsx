@@ -1,15 +1,21 @@
 import { cn } from "@/lib/utils";
 
-type Props = { name: string; amount: string; percent: number; color?: string };
+type Props = {
+  name: string;
+  amount: string;
+  percent: number;
+  color?: string;
+  onClick?: () => void;
+};
 
 const BAR_COLORS = ["bg-brand", "bg-blue-500", "bg-amber-500", "bg-violet-500", "bg-rose-500"];
 
-export function CategoryProgress({ name, amount, percent, color }: Props) {
+export function CategoryProgress({ name, amount, percent, color, onClick }: Props) {
   const barColorClass = color ? undefined : BAR_COLORS[Math.abs(name.charCodeAt(0)) % BAR_COLORS.length];
   const barStyle = color ? { width: `${percent}%`, backgroundColor: color } : { width: `${percent}%` };
 
-  return (
-    <div className="flex items-center gap-3">
+  const content = (
+    <>
       <div className="min-w-0 flex-1">
         <div className="mb-1 flex items-center justify-between gap-2">
           <span className="truncate text-sm">{name}</span>
@@ -23,6 +29,20 @@ export function CategoryProgress({ name, amount, percent, color }: Props) {
         </div>
       </div>
       <span className="w-8 shrink-0 text-right text-[11px] text-neutral-400">{percent}%</span>
-    </div>
+    </>
   );
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="flex w-full items-center gap-3 rounded-lg text-left active:bg-neutral-50"
+      >
+        {content}
+      </button>
+    );
+  }
+
+  return <div className="flex items-center gap-3">{content}</div>;
 }

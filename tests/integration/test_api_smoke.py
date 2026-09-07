@@ -63,7 +63,8 @@ def test_stats_api(
         user=user,
         account=account,
         amount=250_00,
-        category=system_categories["dairy"],
+        category=system_categories["products"],
+        tags=[system_categories["dairy"]],
         occurred_at=datetime(2026, 6, 10, 12, 0, 0),
     )
     resp = client.get(

@@ -91,16 +91,8 @@ export function loadCategoryStats(expenseTx: Transaction[], categoriesTree: Cate
 }
 
 function resolveStatColorForLabel(categories: Category[], label: string): string | undefined {
-  for (const root of categories) {
-    if (root.name === label) {
-      return resolveCategoryColor(root.color, root.name);
-    }
-    for (const child of root.children ?? []) {
-      if (`${root.name} › ${child.name}` === label) {
-        return resolveCategoryColor(child.color ?? root.color, child.name);
-      }
-    }
-  }
+  const found = categories.find((c) => c.name === label);
+  if (found) return resolveCategoryColor(found.color, found.name);
   return undefined;
 }
 

@@ -1,19 +1,17 @@
-"""Фильтр stats по category_id (ветка / подкатегория)."""
+"""Фильтр stats по category_id / tag_id."""
 from datetime import datetime
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
-from app.database.models import Account, Category, User
+from app.database.models import Account, User
 from app.dto.transactions import TransactionFilterDTO
 from app.services.stats_service import StatsService
 from tests.conftest import make_manual_tx, make_qr_tx
 
 
-def _seed_mixed(
-    db: Session, user: User, account: Account, cats: dict[str, Category]
-) -> None:
+def _seed_mixed(db: Session, user: User, account: Account, cats: dict) -> None:
     make_manual_tx(
         db,
         user=user,
@@ -29,7 +27,8 @@ def _seed_mixed(
         user=user,
         account=account,
         amount=500_00,
-        category=cats["dairy"],
+        category=cats["products"],
+        tags=[cats["dairy"]],
         occurred_at=datetime(2026, 6, 2, 10, 0, 0),
         comment="Молоко",
     )
@@ -39,8 +38,8 @@ def _seed_mixed(
         account=account,
         occurred_at=datetime(2026, 6, 3, 12, 0, 0),
         items=[
-            ("Молоко", 200_00, cats["dairy"]),
-            ("Чипсы", 300_00, cats["snacks"]),
+            ("Молоко", 200_00, cats["products"], [cats["dairy"]]),
+            ("Чипсы", 300_00, cats["products"], [cats["snacks"]]),
         ],
     )
     make_manual_tx(
@@ -54,8 +53,8 @@ def _seed_mixed(
     )
 
 
-def test_stats_filter_by_parent_includes_children(
-    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+def test_stats_filter_by_category(
+    db: Session, user: User, account: Account, system_categories: dict
 ) -> None:
     _seed_mixed(db, user, account, system_categories)
     stats = StatsService(db).get_stats(
@@ -67,21 +66,15 @@ def test_stats_filter_by_parent_includes_children(
             timezone="Europe/Moscow",
         )
     )
-    # Молочные 700 + Снэки 300; income по expense-ветке = 0
     assert stats.expense == 1_000_00
     assert stats.income == 0
     by_name = {c.name: c.amount for c in stats.categories}
-    assert by_name == {
-        "Продукты › Молочные": 700_00,
-        "Продукты › Снэки": 300_00,
-    }
+    assert by_name == {"Продукты": 1_000_00}
     assert "Прочее" not in by_name
-    assert len(stats.recent_expenses) >= 1
-    assert all(t.type == "expense" for t in stats.recent_expenses)
 
 
-def test_stats_filter_by_subcategory(
-    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+def test_stats_filter_by_tag(
+    db: Session, user: User, account: Account, system_categories: dict
 ) -> None:
     _seed_mixed(db, user, account, system_categories)
     stats = StatsService(db).get_stats(
@@ -89,19 +82,19 @@ def test_stats_filter_by_subcategory(
             user_id=user.id,
             from_date=datetime(2026, 6, 1),
             to_date=datetime(2026, 6, 30),
-            category_uid=system_categories["dairy"].uid,
+            tag_uid=system_categories["dairy"].uid,
             timezone="Europe/Moscow",
         )
     )
     assert stats.expense == 700_00
     assert stats.income == 0
     assert len(stats.categories) == 1
-    assert stats.categories[0].name == "Продукты › Молочные"
+    assert stats.categories[0].name == "Продукты"
     assert stats.categories[0].percent == 100
 
 
 def test_stats_filter_by_income_category(
-    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+    db: Session, user: User, account: Account, system_categories: dict
 ) -> None:
     _seed_mixed(db, user, account, system_categories)
     stats = StatsService(db).get_stats(
@@ -119,9 +112,7 @@ def test_stats_filter_by_income_category(
     assert stats.recent_expenses == []
 
 
-def test_stats_unknown_category(
-    db: Session, user: User, account: Account
-) -> None:
+def test_stats_unknown_category(db: Session, user: User, account: Account) -> None:
     with pytest.raises(NotFoundError):
         StatsService(db).get_stats(
             TransactionFilterDTO(

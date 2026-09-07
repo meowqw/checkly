@@ -4,18 +4,22 @@
 
 Связанный документ: [`../BACKEND.md`](../BACKEND.md)
 
+**Модель категорий:** плоский список (без `parent_id` / детей). У позиций чека — **теги** (`tags[]`, M2M), независимые от категории. API: `/v1/tags`, фильтр `tag_id`, PATCH item `{ category_id, tag_ids? }`.
+
 ---
 
 ## 1. Что делает клиент
 
 Мобильный и веб-клиент для Finance Manager / **Checkly alfa**:
 - авторизация
-- дашборд (баланс, категории, последние траты)
-- список операций с фильтрами и навигацией по периодам
+- дашборд (баланс, категории, последние траты) — тап по категории → фильтр операций
+- список операций с фильтрами (тип, счёт, **категория**, **тег**), периодами и пагинацией online
 - ручное добавление дохода/расхода
-- сканирование QR чека (нативно на Android, камера в браузере)
-- счета, категории (свои + системные)
+- сканирование QR чека (нативно на Android, камера в браузере); **409** «чек уже добавлен»
+- счета: CRUD + **семейный доступ** (инвайт / join, роли owner|member)
+- категории и **теги** (свои + системные)
 - **offline-first**: ручные операции и счета работают без сети, синхронизация при online
+  (инвайты, join, QR, CRUD категорий/тегов — **только online**)
 
 ---
 
@@ -104,7 +108,8 @@ web/
 
 **Страницы и компоненты импортируют `@/api/data-service`**, не `client.ts` напрямую.
 
-Исключения: `AuthContext` (login/register), типы, `formatMoney`, `rublesToKopecks`.
+Исключения: `AuthContext` (login/register), типы, `formatMoney`, `rublesToKopecks`,
+`isAccountOwner` / `myAccountRole`.
 
 ---
 
@@ -117,11 +122,11 @@ web/
 
 ProtectedRoute + AccountsProvider + Layout:
   /                       DashboardPage
-  /transactions           TransactionsPage
+  /transactions           TransactionsPage  (?category_id= / ?tag_id=)
   /add                    AddTransactionPage
   /qr                     QrPage
   /accounts               AccountsPage
-  /categories             CategoriesPage
+  /categories             CategoriesPage  (вкладки категории | теги)
   /settings               SettingsPage
   *                       → redirect /
 ```
@@ -173,9 +178,16 @@ AuthProvider
 - APK/prod: **обязателен** `VITE_API_URL` при сборке
 - Суммы в **копейках**; UI: `formatMoney()`, формы: `rublesToKopecks()`
 
-Эндпоинты: `/v1/auth/*`, `/accounts`, `/categories`, `/transactions`, `/receipts/qr`, **`/stats`**
+Эндпоинты: `/v1/auth/*`, `/accounts` (+ `/join`, `/{id}/invites`), `/categories`,
+`/transactions` (`category_id`, `limit`/`offset`), `/receipts/qr`, **`/stats`** (`category_id`)
 
 Типы stats: `PeriodStats`, `CategoryStat` — `{ expense, income, categories[], recent_expenses[] }`
+
+Типы счетов: `Account` + `members?: AccountMember[]` (`id`, `login`, `role`: `owner`|`member`).
+Хелперы: `myAccountRole`, `isAccountOwner`.
+
+Список tx: `TransactionsListResponse` — без `limit` только `transactions`; с `limit` —
+ещё `total`, `limit`, `offset`, `has_more`.
 
 ### data-service.ts — фасад (использовать в UI)
 
@@ -186,19 +198,24 @@ AuthProvider
 |---------|--------|---------|
 | `getAccounts` | API → cache | cache |
 | `createAccount` / `deleteAccount` | API | queue + optimistic |
+| `createAccountInvite` / `joinAccount` | API | **ошибка** |
 | `getCategories` | API → cache | cache |
 | `create/update/deleteCategory` | API | **ошибка** |
-| `getTransactions` | API → cache → merge | cache → merge |
+| `getTags` | API → cache | cache |
+| `create/deleteTag` | API | **ошибка** |
+| `getTransactions` | API → cache → merge; online: `limit`/`offset` | cache → merge (без пагинации / fallback без limit) |
 | **`getStats`** | API → cache | cache stats **или** `buildStatsFromTransactions` |
 | `createTransaction` | API | local tx + queue |
 | `deleteTransaction` | API | hide + queue |
-| `updateTransactionItem` | API | queue + patch cache |
+| `updateTransactionItem` | API (`category_id`, `tag_ids?`) | queue + patch cache (категория) |
 | `scanQr` | API | **ошибка** |
 | `prefetchCoreData` | warm cache | no-op |
 | `processSyncQueue` | replay queue | no-op offline |
 
 После мутаций: `notifyAccountsChanged()` / `notifyTransactionsChanged()`.  
 Инвалидация `transactions:*` **и** `stats:*` — вместе (см. `invalidateAllTransactionsCache`).
+
+Фильтры в merge offline: `category_id` — **точное** совпадение позиции; `tag_id` — позиция с этим тегом.
 
 ---
 
@@ -221,6 +238,7 @@ DB: `finance_manager`, version 1
 
 - `accounts`
 - `categories`
+- `tags`
 - `transactions:${JSON.stringify(params)}`
 - **`stats:${JSON.stringify(params)}`** — агрегаты главной (период + account_id)
 - `meta:tempIdMap` — маппинг `local_*` → server id
@@ -266,6 +284,7 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 - PeriodNavigator: day/week/month + стрелки
 - Баланс (sum accounts), расходы/доходы из `stats.expense` / `stats.income`
 - Категории: `stats.categories` (с бэка, по позициям чеков); preview **5** + «ещё N»
+- Тап по категории с `category_id` → `/transactions?category_id=...`
 - Последние траты: `stats.recent_expenses` (до 8, compact с бэка)
 - Offline: `buildStatsFromTransactions()` из кэша tx + categories
 - UX: `DashboardSkeleton`, `RefreshBar` при фоновой revalidate
@@ -274,14 +293,16 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 ### TransactionsPage (`/transactions`)
 
 - PeriodNavigator (default: month)
-- Фильтры: тип, счёт
+- Фильтры: тип, счёт, **категория** (`category_id`), **тег** (`tag_id`); URL `?category_id=` / `?tag_id=`
+- Online: пагинация `limit=40` + кнопка «Показать ещё» (`has_more`)
+- Offline: полный кэш периода без limit
 - Группировка по дате (`groupByDate`)
-- Expand row → позиции, удаление, `ItemCategorySheet`
+- Expand row → позиции (категория + теги), удаление, `ItemCategorySheet`
 
 ### AddTransactionPage (`/add`)
 
 - Сумма в рублях → kopecks
-- expense/income, счёт, CategoryPicker, datetime-local
+- expense/income, счёт, CategoryPicker (плоский), datetime-local
 - `toApiDateTimeLocal()` — naive local ISO
 - **работает offline**
 
@@ -289,13 +310,18 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 
 - **только online**
 - Native scan (Capacitor ML Kit) / web camera
-- `data.scanQr()` → список позиций
-- Редактирование категорий позиций
+- `data.scanQr()` → список позиций (категория + теги)
+- Редактирование категорий/тегов позиций
+- HTTP **409** → предупреждение «чек уже добавлен» + ссылка на операции (не красная ошибка)
 
 ### AccountsPage, CategoriesPage, SettingsPage
 
-- Accounts: CRUD, offline create/delete
-- Categories: системные + свои; create/delete **online only**
+- Accounts:
+  - CRUD (create offline ok; delete **только owner**)
+  - список `members` (логин + роль)
+  - owner: «Пригласить» → `createAccountInvite` → токен + копирование (**online**)
+  - «Войти» → форма токена → `joinAccount` (**online**)
+- Categories: вкладки **Категории** | **Теги**; create/delete **online only**
 - Settings: профиль, links, logout
 
 ### LoginPage
@@ -339,7 +365,7 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 
 ### categories.ts
 
-`getRootCategories`, `getSubcategories`, `buildCategoryDisplayMap`, **`buildCategoryColorMap`**, **`resolveTransactionDotColor`**
+`getRootCategories`, `findCategoryById`, `buildCategoryDisplayMap`, **`buildCategoryColorMap`**, **`resolveTransactionDotColor`**
 
 - **`qr_receipt`**: `dotColor = null` → белый маркер с обводкой (категория только у позиций)
 - manual: цвет из первой позиции / `tx.category`
@@ -354,14 +380,14 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 
 | Действие | Offline |
 |----------|---------|
-| List | ✅ cache |
-| Create custom | ❌ |
-| Delete custom | ❌ |
-| Patch item category | ✅ queue |
+| List categories / tags | ✅ cache |
+| Create/delete custom category | ❌ |
+| Create/delete custom tag | ❌ |
+| Patch item category (+ tags online) | ✅ queue (категория) |
 
-**Чеки** используют только **системные** категории (бэкенд + LLM).
+**Чеки** используют только **системные** категории и теги (бэкенд + LLM).
 
-Компоненты: `CategoryPicker`, `CreateCategorySheet` (portal `z-[100]`, футер над bottom nav), `ItemCategorySheet`
+Компоненты: `CategoryPicker` (single-select), `TagPicker` (multi, max 5), `CreateCategorySheet` (portal `z-[100]`), `ItemCategorySheet` (категория + теги)
 
 ---
 
@@ -451,19 +477,22 @@ Dev: `npm run dev` → `:5173`
 - Читать/писать через **`data-service`**
 - **Главная**: `getStats`, не `getTransactions`
 - Суммы: **`rublesToKopecks` / `formatMoney`**
-- Фильтры: **`getPeriodRange` + `toApiDateTimeRange`**
+- Фильтры: **`getPeriodRange` + `toApiDateTimeRange`**; категория — `category_id`, тег — `tag_id`
 - Списки tx: подписка **`subscribeTransactionsChanged`** (главная перезагружает stats)
 - Цвета маркеров: **`resolveTransactionDotColor`** + color map
 - Счета: **`useAccounts()`**; пустой список → **`NoAccountsNotice`**
-- QR и CRUD категорий: проверять **`useSync().online`**
+- Удаление счёта / инвайты: только если **`isAccountOwner(account, user.id)`**
+- QR, join, invite, CRUD категорий/тегов: проверять **`useSync().online`**
 - Фоновый refresh: **`trackBackgroundFresh`** + **`RefreshBar`**
 
 ### Не делать
 
 - `api.*` из pages (кроме auth)
 - Думать что API в рублях — только **копейки**
-- Category create offline
+- Category/tag create / invite / join / QR offline
+- Показывать «Удалить счёт» участнику (member)
 - Менять API URL без rebuild APK
+- Иерархию категорий / `parent_id` / `children` / `include=children`
 
 ### Offline flow
 
@@ -499,6 +528,10 @@ UI action
 | Новая страница | `src/pages/` + `App.tsx` route |
 | API вызов из UI | `src/api/data-service.ts` |
 | HTTP/types | `src/api/client.ts` |
+| Семейные счета | `AccountsPage`, `createAccountInvite` / `joinAccount` |
+| Фильтр категории / тега | `TransactionsPage` (`?category_id=` / `?tag_id=`), Dashboard → navigate |
+| Теги | `TagPicker`, `CategoriesPage` (вкладка), `getTags` / `createTag` |
+| Пагинация tx | `getTransactions` + `limit`/`offset`/`has_more` |
 | Статистика главной | `getStats`, `src/lib/stats.ts` |
 | Цвета категорий / dot | `src/lib/categories.ts` |
 | Cache-first UI | `src/lib/cache-first.ts`, `RefreshBar` |

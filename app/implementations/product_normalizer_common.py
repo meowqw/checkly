@@ -3,7 +3,11 @@ import json
 import logging
 from typing import Any
 
-from app.core.category_taxonomy import build_taxonomy_prompt_block, normalize_expense_category, resolve_subcategory
+from app.core.category_taxonomy import (
+    build_taxonomy_prompt_block,
+    normalize_expense_category,
+    resolve_tags,
+)
 from app.core.exceptions import ExternalServiceError
 from app.dto.receipts import (
     NormalizedItemDTO,
@@ -21,22 +25,21 @@ SYSTEM_PROMPT = f"""Ты помощник для нормализации поз
 - normalized_name (краткое нормализованное имя)
 - product_name (человекочитаемое название)
 - brand (строка или null)
-- category (родительская категория)
-- subcategory (подкатегория — ОБЯЗАТЕЛЬНО, если у категории есть дочерние в дереве)
+- category (одна плоская категория расходов из списка)
+- tags (массив строк — 0…3 тега из словаря; теги НЕ зависят от категории)
 - confidence (число от 0 до 1)
 
 {build_taxonomy_prompt_block()}
 
 Правила:
-- category и subcategory должны строго совпадать с деревом выше (регистр и формулировка).
-- Если у категории есть подкатегории — subcategory не может быть null.
-- Для «Подарки», «Животные» и «Прочее» subcategory = null.
-- Продукты → Снэки: чипсы, орехи, сухарики, попкорн, снеки.
-- Продукты → Никотин: сигареты, табак, стики, вейп, IQOS, Glo.
-- Животные: корм, наполнитель, товары для питомцев.
-- Продукты → Алкоголь: пиво, вино, водка, шампанское и любой алкоголь.
-- Продукты → Напитки: только безалкогольное (вода, сок, газировка, чай, кофе, энергетики).
-- Продукты → Крупы: рис, гречка, овсянка, перловка, макароны, мука, бобовые в сухом виде.
+- category — строго из списка категорий (регистр и формулировка).
+- tags — только из словаря тегов; можно пустой массив [].
+- Не выдумывай категории и теги вне списков.
+- Один тег может подходить к разным категориям (например «Бытовая химия» при category «Дом»).
+- Алкоголь → category «Продукты», tags: ["Алкоголь"].
+- Безалкогольные напитки → tags: ["Напитки"].
+- Никотин / вейп / IQOS → tags: ["Никотин"].
+- Корм и товары для питомцев → category «Животные», tags обычно [].
 - Суммы не меняй. Отвечай только валидным JSON."""
 
 
@@ -69,11 +72,11 @@ def map_to_output(raw_items: list[dict[str, Any]]) -> ProductNormalizerOutputDTO
             continue
         raw_name = entry.get("raw_name", "")
         category = normalize_expense_category(entry.get("category"))
-        subcategory = resolve_subcategory(
-            category,
-            entry.get("subcategory"),
-            raw_name,
-        )
+        # совместимость со старыми ответами модели: subcategory → один тег
+        suggested = entry.get("tags")
+        if suggested is None and entry.get("subcategory"):
+            suggested = [entry.get("subcategory")]
+        tags = resolve_tags(suggested, raw_name)
         items.append(
             NormalizedItemDTO(
                 raw_name=raw_name,
@@ -81,7 +84,7 @@ def map_to_output(raw_items: list[dict[str, Any]]) -> ProductNormalizerOutputDTO
                 product_name=entry.get("product_name") or entry.get("normalized_name", ""),
                 brand=entry.get("brand"),
                 category=category,
-                subcategory=subcategory,
+                tags=tags,
                 confidence=float(entry.get("confidence", 0.5)),
             )
         )

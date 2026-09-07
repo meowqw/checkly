@@ -6,7 +6,7 @@ from app.dto.transactions import TransactionListItemDTO
 
 class CategoryStatDTO(BaseModel):
     category_id: str | None = Field(default=None, description="UUID категории (если известна)")
-    name: str = Field(description="Отображаемое имя: «Родитель › Подкатегория» или корень")
+    name: str = Field(description="Имя категории")
     amount: int = Field(description="Сумма в копейках")
     percent: int = Field(description="Доля от общих расходов за период, %")
     color: str | None = Field(default=None, description="Цвет категории #RRGGBB")

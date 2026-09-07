@@ -3,14 +3,14 @@ from datetime import datetime
 
 from sqlalchemy.orm import Session
 
-from app.database.models import Account, Category, User
+from app.database.models import Account, User
 from app.dto.transactions import TransactionFilterDTO
 from app.services.stats_service import StatsService
 from tests.conftest import make_manual_tx, make_qr_tx
 
 
 def test_stats_sums_and_categories_by_items(
-    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+    db: Session, user: User, account: Account, system_categories: dict
 ) -> None:
     make_manual_tx(
         db,
@@ -27,7 +27,8 @@ def test_stats_sums_and_categories_by_items(
         user=user,
         account=account,
         amount=500_00,
-        category=system_categories["dairy"],
+        category=system_categories["products"],
+        tags=[system_categories["dairy"]],
         occurred_at=datetime(2026, 6, 2, 10, 0, 0),
         comment="Молоко",
     )
@@ -37,11 +38,10 @@ def test_stats_sums_and_categories_by_items(
         account=account,
         occurred_at=datetime(2026, 6, 3, 12, 0, 0),
         items=[
-            ("Молоко", 200_00, system_categories["dairy"]),
-            ("Чипсы", 300_00, system_categories["snacks"]),
+            ("Молоко", 200_00, system_categories["products"], [system_categories["dairy"]]),
+            ("Чипсы", 300_00, system_categories["products"], [system_categories["snacks"]]),
         ],
     )
-    # расход без позиций → «Прочее»
     from app.core.enums import Currency, TransactionSource, TransactionType
     from app.core.uuid_utils import new_uid
     from app.database.models import Transaction
@@ -70,18 +70,17 @@ def test_stats_sums_and_categories_by_items(
     )
 
     assert stats.income == 10_000_00
-    assert stats.expense == 500_00 + 500_00 + 100_00  # manual + qr total + orphan
+    assert stats.expense == 500_00 + 500_00 + 100_00
     by_name = {c.name: c for c in stats.categories}
-    assert by_name["Продукты › Молочные"].amount == 700_00  # 500 + 200
-    assert by_name["Продукты › Снэки"].amount == 300_00
+    assert by_name["Продукты"].amount == 1_000_00  # 500+200+300
     assert by_name["Прочее"].amount == 100_00
-    assert sum(c.percent for c in stats.categories) in (99, 100, 101)  # round
+    assert sum(c.percent for c in stats.categories) in (99, 100, 101)
     assert len(stats.recent_expenses) <= 8
     assert all(t.type == "expense" for t in stats.recent_expenses)
 
 
 def test_stats_respects_date_filter(
-    db: Session, user: User, account: Account, system_categories: dict[str, Category]
+    db: Session, user: User, account: Account, system_categories: dict
 ) -> None:
     make_manual_tx(
         db,

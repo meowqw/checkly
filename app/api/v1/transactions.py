@@ -32,9 +32,9 @@ _AUTH_ERRORS = {401: COMMON_ERROR_RESPONSES[401]}
     summary="Список транзакций",
     description=(
         "Фильтрация по периоду (`from`, `to` — даты YYYY-MM-DD в часовом поясе клиента), "
-        "типу, счёту и опционально категории.\n\n"
-        "`category_id`: корень — вся ветка (родитель + подкатегории); "
-        "подкатегория — операции с позицией в этой категории.\n\n"
+        "типу, счёту, категории и тегу.\n\n"
+        "`category_id` — exact match по категории позиции.\n"
+        "`tag_id` — операции, у которых хотя бы одна позиция имеет этот тег.\n\n"
         "Пагинация опциональна: без `limit` возвращается весь список (как раньше). "
         "С `limit`/`offset` в ответ добавляются `total`, `limit`, `offset`, `has_more` "
         f"(max limit = {TRANSACTIONS_MAX_LIMIT})."
@@ -59,10 +59,11 @@ def list_transactions(
     account_id: str | None = Query(default=None, description="UUID счёта"),
     category_id: str | None = Query(
         default=None,
-        description=(
-            "UUID категории. Родитель — вся ветка; дочерняя — только она "
-            "(по позиции чека / категории ручной операции)"
-        ),
+        description="UUID категории (exact match по позиции чека / ручной операции)",
+    ),
+    tag_id: str | None = Query(
+        default=None,
+        description="UUID тега — операции с хотя бы одной позицией с этим тегом",
     ),
     limit: int | None = Query(
         default=None,
@@ -79,6 +80,7 @@ def list_transactions(
         type=type,
         account_uid=account_id,
         category_uid=category_id,
+        tag_uid=tag_id,
         timezone=tz,
         limit=limit,
         offset=offset,
@@ -149,8 +151,8 @@ def update_transaction(
 @router.patch(
     "/{transaction_id}/items/{item_id}",
     response_model=TransactionResponseDTO,
-    summary="Категория позиции чека",
-    description="Назначает категорию отдельной позиции в чеке.",
+    summary="Категория и теги позиции",
+    description="Назначает категорию позиции; опционально заменяет набор тегов (`tag_ids`).",
     responses={**_AUTH_ERRORS, 404: COMMON_ERROR_RESPONSES[404]},
 )
 def update_transaction_item(
@@ -165,6 +167,7 @@ def update_transaction_item(
         transaction_uid=transaction_id,
         item_uid=item_id,
         category_uid=dto.category_id,
+        tag_uids=dto.tag_ids,
     )
     return TransactionService(db).update_transaction_item(service_dto)
 

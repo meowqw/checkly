@@ -6,6 +6,7 @@ from app.dto.transactions import (
     AccountBriefDTO,
     CategoryBriefDTO,
     MerchantBriefDTO,
+    TagBriefDTO,
     TransactionItemBriefDTO,
     TransactionListItemDTO,
 )
@@ -15,12 +16,17 @@ def map_item_to_brief(
     item: TransactionItem, category: Category | None = None
 ) -> TransactionItemBriefDTO:
     cat = category or item.category
+    tags = [
+        TagBriefDTO(id=t.uid, name=t.name)
+        for t in (item.tags or [])
+    ]
     return TransactionItemBriefDTO(
         id=item.uid,
         raw_name=item.raw_name,
         amount=item.amount,
         category_id=cat.uid if cat else None,
         category=CategoryBriefDTO(name=category_display_name(cat)) if cat else None,
+        tags=tags,
     )
 
 

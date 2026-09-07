@@ -100,13 +100,16 @@ finance_manager/
 │   │       ├── auth.py
 │   │       ├── accounts.py
 │   │       ├── categories.py
+│   │       ├── tags.py
 │   │       ├── transactions.py
 │   │       ├── receipts.py
 │   │       └── stats.py
-│   ├── dto/                    # Pydantic: *RequestDTO, *ResponseDTO (+ stats.py)
+│   ├── dto/                    # Pydantic: *RequestDTO, *ResponseDTO (+ stats.py, tags.py)
 │   ├── services/
 │   │   ├── transaction_service.py
 │   │   ├── stats_service.py    # агрегаты для /v1/stats
+│   │   ├── category_service.py
+│   │   ├── tag_service.py
 │   │   ├── transaction_mapper.py   # ORM → TransactionListItemDTO (shared)
 │   │   └── transaction_queries.py  # list_transactions_for_filters (shared)
 │   ├── repositories/           # SQLAlchemy-запросы
@@ -118,16 +121,16 @@ finance_manager/
 │   │   ├── security.py         # JWT, hash password
 │   │   ├── exceptions.py
 │   │   ├── timing_middleware.py  # X-Process-Time / X-Process-Time-Ms
-│   │   ├── category_taxonomy.py  # дерево категорий + keyword hints для LLM
+│   │   ├── category_taxonomy.py  # плоские категории + словарь тегов + LLM prompt
 │   │   ├── category_display.py   # category_display_name() для API
 │   │   └── uuid_utils.py
 │   └── database/
 │       ├── __init__.py         # engine, SessionLocal, get_db
 │       └── models.py
 ├── alembic/
-│   └── versions/               # 001–006
+│   └── versions/               # 001–007
 ├── scripts/
-│   ├── seed_categories.py
+│   ├── seed_categories.py      # системные категории + теги
 │   ├── seed_demo_data.py       # тестовые пользователи/tx/чеки
 │   ├── benchmark_api.py        # latency эндпоинтов
 │   └── clean_receipt_data.py
@@ -216,29 +219,50 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 | Method | Path | Query / Body | Response |
 |--------|------|--------------|----------|
-| GET | `/` | `include=children` | `{categories: [...]}` |
-| POST | `/` | `{name, type, parent_id?, icon?, color?}` | `{category}` |
+| GET | `/` | — | `{categories: [...]}` — **плоский** список |
+| POST | `/` | `{name, type, icon?, color?}` | `{category}` |
 | PATCH | `/{category_id}` | `{name?, icon?, color?}` | `{category}` |
 | DELETE | `/{category_id}` | — | `{success: true}` |
 
-`CategoryDTO`: `{id, name, type, parent_id, icon, color, is_custom, children?}`
+`CategoryDTO`: `{id, name, type, icon, color, is_custom}`
 
+- **Нет иерархии** (нет `parent_id` / `children` / подкатегорий)
 - `user_id IS NULL` → системная категория (read-only для пользователя)
 - `is_custom: true` → создана пользователем; delete/update разрешены
 - Системные категории используются для **парсинга чеков** и LLM
-- Имя уникально среди системных + своих категорий пользователя на том же уровне (`parent_id` + `type`); дубликат → **409**
+- Имя уникально среди системных + своих того же `type`; дубликат → **409**
 
 Файлы: `app/api/v1/categories.py`, `app/services/category_service.py`
+
+### 4.3.1 Tags — `/v1/tags`
+
+Теги — **отдельная сущность**, не связаны с категориями. Один тег может стоять у позиций с разными категориями.
+
+| Method | Path | Body | Response |
+|--------|------|------|----------|
+| GET | `/` | — | `{tags: [...]}` — системные + свои |
+| POST | `/` | `{name, icon?, color?}` | `{tag}` — пользовательский |
+| DELETE | `/{tag_id}` | — | `{success: true}` — только свой |
+
+`TagDTO`: `{id, name, icon, color, is_custom}`
+
+- `user_id IS NULL` → системный тег (read-only)
+- `is_custom: true` → создан пользователем; delete разрешён
+- **Нет PATCH** (в отличие от категорий) — переименовать нельзя, только удалить и создать заново
+- Имя уникально среди системных + своих; дубликат → **409**
+- M2M: `transaction_item_tags`. В позициях API: `tags: [{id, name}]`
+
+Файлы: `app/api/v1/tags.py`, `app/services/tag_service.py`, `app/dto/tags.py`
 
 ### 4.4 Transactions — `/v1/transactions`
 
 | Method | Path | Query / Body | Response |
 |--------|------|--------------|----------|
-| GET | `/` | `from`, `to`, `type`, `account_id`, **`category_id?`**, **`limit?`**, **`offset?`** | `{transactions: [...]}` (+ meta при пагинации) |
+| GET | `/` | `from`, `to`, `type`, `account_id`, **`category_id?`**, **`tag_id?`**, **`limit?`**, **`offset?`** | `{transactions: [...]}` (+ meta при пагинации) |
 | POST | `/` | manual tx body | `{transaction}` |
 | GET | `/{id}` | — | `{transaction}` (detail) |
 | PATCH | `/{id}` | `{amount?, category_id?, comment?}` | `{transaction}` — **только manual** |
-| PATCH | `/{id}/items/{item_id}` | `{category_id}` | `{transaction}` |
+| PATCH | `/{id}/items/{item_id}` | `{category_id, tag_ids?}` | `{transaction}` |
 | DELETE | `/{id}` | — | `{success: true}` |
 
 **Пагинация (аддитивная, фронт без изменений работает):**
@@ -255,11 +279,10 @@ HTTP → api/v1/*.py (тонкий контроллер)
 ```
 - Константа max: `TRANSACTIONS_MAX_LIMIT = 100` в `transaction_service.py`
 
-**Фильтр `category_id` (как у `/stats`):**
-- корень → операции с позицией в родителе или любой подкатегории;
-- подкатегория → только с позицией в ней;
-- ручная операция попадает, если её item.category в scope;
-- QR-чек попадает, если **хотя бы одна** позиция в scope (в ответе items чека по-прежнему все).
+**Фильтры (как у `/stats`):**
+- `category_id` — **exact match** по `transaction_items.category_id`
+- `tag_id` — операции, у которых хотя бы одна позиция имеет этот тег
+- фильтры можно комбинировать (AND)
 
 **Create manual:**
 ```json
@@ -277,11 +300,12 @@ HTTP → api/v1/*.py (тонкий контроллер)
 **List item:** `{id, type, amount, currency, occurred_at, source, comment, title, account, merchant, category, items_count, items}`
 
 - `category` в list — **только manual**; для `qr_receipt` → `null`
-- `items[].category` — `{name}` (`CategoryBriefDTO`), не `dict`
-- Маппинг list/detail: `transaction_mapper.py` (используется и в `TransactionService`, и в `StatsService`)
-- Загрузка связей: `selectinload` (account, merchant, items→category→parent)
+- `items[].category` — `{name}` (`CategoryBriefDTO`)
+- `items[].tags` — `[{id, name}]`
+- Маппинг list/detail: `transaction_mapper.py`
+- Загрузка связей: `selectinload` (account, merchant, items→category, items→tags)
 
-**Detail item:** `{id, amount, source, type, currency, occurred_at, comment, merchant, items: [{id, raw_name, amount, category_id, category}]}`
+**Detail item:** `{id, amount, source, type, currency, occurred_at, comment, merchant, items: [{id, raw_name, amount, category_id, category, tags}]}`
 
 `source`: `manual` | `qr_receipt` | `ocr` | `import`
 
@@ -303,29 +327,29 @@ HTTP → api/v1/*.py (тонкий контроллер)
 
 | Method | Path | Query | Response |
 |--------|------|-------|----------|
-| GET | `/` | `from`, `to`, `account_id`, **`category_id?`** | см. ниже |
+| GET | `/` | `from`, `to`, `account_id`, **`category_id?`**, **`tag_id?`** | см. ниже |
 
 ```json
 {
   "expense": 125000,
   "income": 300000,
   "categories": [
-    { "category_id": "uuid|null", "name": "Продукты › Снэки", "amount": 4500, "percent": 12, "color": "#16a34a" }
+    { "category_id": "uuid|null", "name": "Продукты", "amount": 4500, "percent": 12, "color": "#16a34a" }
   ],
   "recent_expenses": [ /* до 8 TransactionListItemDTO, compact */ ]
 }
 ```
 
 **Правила агрегации (`StatsService`):**
-- Без `category_id`: `expense` / `income` — `SUM(transaction.amount)` по типу (SQL)
-- С `category_id`: суммы по **позициям** (`transaction_items`) в scope категорий; корень = родитель + все дети, подкатегория = только она
-- `categories` — **только расходы**; для чеков суммируются **позиции** (`transaction_items.amount`), не сумма чека целиком (SQL GROUP BY + display-name в Python)
-- транзакции **без позиций** → сумма tx в «Прочее» (**только** без фильтра `category_id`)
+- Без `category_id`/`tag_id`: `expense` / `income` — `SUM(transaction.amount)` по типу (SQL)
+- С фильтром: суммы по **позициям** (`transaction_items`) в scope; `category_id` — exact, `tag_id` — через M2M
+- `categories` — **только расходы**; для чеков суммируются **позиции** по плоской категории
+- транзакции **без позиций** → сумма tx в «Прочее» (**только** без фильтров category/tag)
 - `percent` — доля от суммы категорийных расходов в текущей выборке
-- `color` — из категории; у подкатегорий наследуется `parent.color`
+- `color` — из категории
 - `recent_expenses` — `LIMIT 8` расходов; при фильтре — только tx с позицией в scope; `compact=True`
 
-Query **`type` нет** — stats всегда считает и расходы, и доходы (в рамках фильтра категорий).
+Query **`type` нет** — stats всегда считает и расходы, и доходы (в рамках фильтров).
 
 Реализация: SQL в repo —
 `sum_amounts_by_type` / `sum_item_amounts_by_type`, `aggregate_expense_category_amounts`, `list_recent_expenses`.
@@ -346,12 +370,14 @@ Query **`type` нет** — stats всегда считает и расходы,
 | `accounts` | uid, name, balance (копейки) |
 | `user_accounts` | связь user ↔ account + **role** (`owner` / `member`) |
 | `account_invites` | одноразовые токены приглашения на счёт |
-| `categories` | дерево; user_id NULL = системная |
+| `categories` | плоские; user_id NULL = системная |
+| `tags` | независимые теги; user_id NULL = системный |
+| `transaction_item_tags` | M2M позиция ↔ тег |
 | `merchants` | глобальные (inn, name, address) |
 | `products` | глобальный каталог товаров |
 | `product_aliases` | raw_name + merchant → product |
 | `transactions` | операция |
-| `transaction_items` | позиция чека / ручная строка |
+| `transaction_items` | позиция чека / ручная строка (`category_id` + tags) |
 | `receipts` | фискальные поля, raw_qr, raw_json; 1:1 с transaction; unique (ФН, ФД, ФП) |
 | `user_product_category_overrides` | персональная категория для product_id |
 
@@ -373,6 +399,7 @@ Enums: `app/core/enums.py` — `TransactionType`, `TransactionSource`, `Category
 | 004 | `004_user_timezone.py` | `users.timezone` |
 | 005 | `005_account_sharing.py` | `user_accounts.role`, `account_invites` |
 | 006 | `006_receipt_fiscal_unique.py` | unique (ФН, ФД, ФП) на `receipts` |
+| 007 | `007_flat_categories_and_tags.py` | теги + M2M; бывшие подкатегории → теги; drop `parent_id` |
 
 ```bash
 docker compose exec app alembic upgrade head
@@ -412,7 +439,7 @@ docker compose exec app alembic upgrade head
 
 ---
 
-## 9. Категории и сидер
+## 9. Категории, теги и сидер
 
 ### Справочник
 
@@ -420,16 +447,20 @@ docker compose exec app alembic upgrade head
 
 Синхронизирован с `scripts/seed_categories.py`.
 
-**Расходы (пример):**
-- Продукты → Молочные, Сладости, Овощи и фрукты, Напитки, Мясо и рыба, **Алкоголь**, **Крупы**, **Снэки**, **Никотин**
-- Здоровье, Дом, Транспорт, Развлечения, Одежда, Связь, Образование, Подарки, **Животные**, Прочее
+**Категории расходов (плоские):**  
+Продукты, Здоровье, Дом, Транспорт, Развлечения, Одежда, Связь, Образование, Подарки, Животные, Прочее
 
 **Доходы:** Зарплата, Подработка, Возвраты, Прочие доходы
 
+**Системные теги** (бывшие «подкатегории», теперь независимы):  
+Молочные, Сладости, Снэки, Никотин, Аптека, Бытовая химия, Обувь, … — полный список в `SYSTEM_TAGS`.
+
+Имя тега может совпадать с именем категории (напр. «Одежда») — это **разные** сущности.
+
 Функции:
 - `normalize_expense_category()` — только из справочника, иначе «Прочее»
-- `resolve_subcategory()` — валидация + keyword hints (`_KEYWORD_HINTS`)
-- `build_taxonomy_prompt_block()` — текст для LLM prompt
+- `resolve_tags()` — валидация ответа LLM + keyword hints
+- `build_taxonomy_prompt_block()` — текст для LLM (категории + теги)
 
 ### Сидер
 
@@ -438,11 +469,12 @@ python scripts/seed_categories.py
 # или автоматически при docker compose up
 ```
 
-Идемпотентен: не дублирует, обновляет icon/color. Безопасен для prod — существующие категории не удаляются, только добавляются недостающие.
+Идемпотентен: создаёт недостающие системные категории и теги, обновляет icon/color категорий.
 
 ### Lookup для чеков
 
-`CategoryService.find_system_for_receipt(category, subcategory)` — **только поиск** системных категорий, без создания новых.
+`CategoryService.find_system_for_receipt(category)` — системная категория.  
+`TagService.resolve_system_tags(names)` — системные теги по именам из LLM.
 
 ---
 
@@ -463,7 +495,7 @@ POST /v1/receipts/qr
        - ProductMatchingService.find_existing_product()
        - known → TransactionItem + user override category
        - unknown → batch LLM normalize
-    8. LLM → find_system_for_receipt → Product + Alias + TransactionItem
+    8. LLM → find_system_for_receipt + resolve_system_tags → Product + Alias + TransactionItem(+tags)
     9. adjust_account_balance (-amount)
     10. commit
 ```
@@ -486,7 +518,8 @@ Env: `PROVERKACHEKA_TOKEN`
 | `gpt` / `openai` | GptProductNormalizer |
 | `auto` | Groq (gsk_) → xAI → GPT |
 
-Prompt включает дерево категорий из `build_taxonomy_prompt_block()`.
+Prompt: плоские категории + независимый словарь тегов (`build_taxonomy_prompt_block()`).  
+Ответ модели: `category` + `tags: string[]` (0…3). Старое поле `subcategory` ещё принимается как один тег (compat).
 
 При ошибке LLM (`ExternalServiceError`) — fallback: категория «Прочее», confidence 0.
 
@@ -527,13 +560,13 @@ Prompt включает дерево категорий из `build_taxonomy_pro
 - `account_id` → internal id через user_accounts
 - доступ: транзакции по **доступным счетам** (`user_accounts`), не только `transaction.user_id == current`
 - sort: `occurred_at DESC`
-- eager load: account, merchant, items→category→parent
+- eager load: account, merchant, items→category, items→tags
 
 ### Отображение категории
 
-`category_display_name()` в `app/core/category_display.py`: `"Родитель › Дочерняя"`
+`category_display_name()` в `app/core/category_display.py`: просто `category.name` (плоские категории).
 
-В **списке** транзакций поле `category` — только для **manual** (из категории первой позиции). Для `qr_receipt` → `category: null`; категории только у **позиций** внутри чека.
+В **списке** транзакций поле `category` — только для **manual** (из категории первой позиции). Для `qr_receipt` → `category: null`; категории и теги только у **позиций** внутри чека.
 
 ---
 

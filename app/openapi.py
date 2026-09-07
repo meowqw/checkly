@@ -28,6 +28,10 @@ OPENAPI_TAGS = [
     {"name": "auth", "description": "Регистрация и вход"},
     {"name": "accounts", "description": "Счета пользователя и семейный доступ"},
     {"name": "categories", "description": "Категории доходов и расходов"},
+    {
+        "name": "tags",
+        "description": "Теги позиций (независимы от категорий; системные + пользовательские)",
+    },
     {"name": "transactions", "description": "Транзакции"},
     {"name": "receipts", "description": "Импорт чеков по QR-коду"},
     {"name": "stats", "description": "Статистика и агрегаты"},

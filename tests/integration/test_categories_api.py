@@ -1,33 +1,40 @@
-"""Категории через API: дерево, parent conflict, чужие."""
+"""Категории и теги через API."""
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.core.enums import CategoryType
-from app.core.exceptions import ConflictError, ForbiddenError
+from app.core.exceptions import ForbiddenError
 from app.core.uuid_utils import new_uid
 from app.database.models import Category, User
-from app.dto.categories import CreateCategoryRequestDTO
 from app.services.category_service import CategoryService
 import pytest
 
 
-def test_categories_api_list_tree(
+def test_categories_api_flat_list(
     client: TestClient,
-    system_categories: dict[str, Category],
+    system_categories: dict,
     auth_headers: dict[str, str],
 ) -> None:
     flat = client.get("/v1/categories", headers=auth_headers)
     assert flat.status_code == 200
     names = {c["name"] for c in flat.json()["categories"]}
     assert "Продукты" in names
-    assert "Молочные" in names
+    assert "Молочные" not in names  # тег, не категория
+    for cat in flat.json()["categories"]:
+        assert "parent_id" not in cat or cat.get("parent_id") is None
+        assert cat.get("children") in (None, [],)
 
-    tree = client.get("/v1/categories", params={"include": "children"}, headers=auth_headers)
-    assert tree.status_code == 200
-    roots = tree.json()["categories"]
-    products = next(c for c in roots if c["name"] == "Продукты")
-    child_names = {c["name"] for c in (products.get("children") or [])}
-    assert "Молочные" in child_names
+
+def test_tags_api_list(
+    client: TestClient,
+    system_categories: dict,
+    auth_headers: dict[str, str],
+) -> None:
+    res = client.get("/v1/tags", headers=auth_headers)
+    assert res.status_code == 200
+    names = {t["name"] for t in res.json()["tags"]}
+    assert "Молочные" in names
+    assert "Снэки" in names
 
 
 def test_categories_api_custom_crud(
@@ -52,18 +59,16 @@ def test_categories_api_custom_crud(
     assert client.delete(f"/v1/categories/{cat_id}", headers=auth_headers).status_code == 200
 
 
-def test_parent_type_mismatch_conflict(
-    db: Session, user: User, system_categories: dict[str, Category]
-) -> None:
-    with pytest.raises(ConflictError):
-        CategoryService(db).create_category(
-            user.id,
-            CreateCategoryRequestDTO(
-                name="Нельзя",
-                type=CategoryType.INCOME,
-                parent_id=system_categories["products"].uid,
-            ),
-        )
+def test_tags_api_custom_crud(client: TestClient, auth_headers: dict[str, str]) -> None:
+    created = client.post(
+        "/v1/tags",
+        headers=auth_headers,
+        json={"name": "Свой тег"},
+    )
+    assert created.status_code == 200
+    tag_id = created.json()["tag"]["id"]
+    assert created.json()["tag"]["is_custom"] is True
+    assert client.delete(f"/v1/tags/{tag_id}", headers=auth_headers).status_code == 200
 
 
 def test_cannot_modify_other_user_category(
