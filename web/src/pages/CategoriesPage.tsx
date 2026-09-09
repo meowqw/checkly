@@ -22,6 +22,7 @@ export default function CategoriesPage() {
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [tagName, setTagName] = useState("");
+  const [tagQuery, setTagQuery] = useState("");
   const [tagSaving, setTagSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const hasEverLoaded = useRef(false);
@@ -70,6 +71,20 @@ export default function CategoriesPage() {
         return a.name.localeCompare(b.name, "ru");
       });
   }, [categories, filter]);
+
+  const sortedTags = useMemo(() => {
+    return [...tags].sort((a, b) => {
+      const usageDiff = (b.usage_count ?? 0) - (a.usage_count ?? 0);
+      if (usageDiff !== 0) return usageDiff;
+      return a.name.localeCompare(b.name, "ru");
+    });
+  }, [tags]);
+
+  const visibleTags = useMemo(() => {
+    const q = tagQuery.trim().toLowerCase();
+    if (!q) return sortedTags;
+    return sortedTags.filter((t) => t.name.toLowerCase().includes(q));
+  }, [sortedTags, tagQuery]);
 
   const removeCategory = async (cat: Category) => {
     if (!cat.is_custom) return;
@@ -222,7 +237,7 @@ export default function CategoriesPage() {
       ) : (
         <div className="space-y-4 pb-4">
           <p className="text-xs text-neutral-500">
-            Теги не привязаны к категориям. Один тег можно использовать с любой категорией.
+            Теги не привязаны к категориям. Часто используемые — выше в списке.
           </p>
           <form onSubmit={(e) => void createTag(e)} className="flex gap-2">
             <input
@@ -235,29 +250,54 @@ export default function CategoriesPage() {
               {tagSaving ? "…" : "Добавить"}
             </Button>
           </form>
-          <div className="flex flex-wrap gap-1.5">
-            {tags.map((tag) => (
-              <span
-                key={tag.id}
-                className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-3 py-1 text-xs font-medium text-neutral-700"
-              >
-                {tag.name}
-                {tag.is_custom ? (
-                  <button
-                    type="button"
-                    className="text-neutral-400 hover:text-red-500"
-                    disabled={deletingId === tag.id}
-                    onClick={() => void removeTag(tag)}
-                    aria-label={`Удалить ${tag.name}`}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                ) : (
-                  <span className="text-[10px] text-neutral-400">sys</span>
-                )}
-              </span>
-            ))}
-          </div>
+          <input
+            type="search"
+            className="input-field w-full text-sm"
+            placeholder="Найти тег…"
+            value={tagQuery}
+            onChange={(e) => setTagQuery(e.target.value)}
+            enterKeyHint="search"
+          />
+          {visibleTags.length === 0 ? (
+            <p className="py-6 text-center text-sm text-neutral-400">
+              {tagQuery.trim() ? "Ничего не найдено" : "Тегов пока нет"}
+            </p>
+          ) : (
+            <div className="divide-y divide-neutral-100 overflow-hidden rounded-xl border border-neutral-100">
+              {visibleTags.map((tag) => (
+                <div key={tag.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-neutral-800">{tag.name}</span>
+                      {tag.is_custom ? (
+                        <span className="shrink-0 rounded-full bg-brand-muted px-2 py-0.5 text-[10px] font-medium text-brand-dark">
+                          Моя
+                        </span>
+                      ) : (
+                        <span className="shrink-0 text-[10px] text-neutral-400">sys</span>
+                      )}
+                    </div>
+                    {(tag.usage_count ?? 0) > 0 && (
+                      <p className="text-[11px] tabular-nums text-neutral-400">
+                        использован {tag.usage_count}×
+                      </p>
+                    )}
+                  </div>
+                  {tag.is_custom && (
+                    <button
+                      type="button"
+                      className="rounded-lg p-2 text-neutral-400 hover:bg-red-50 hover:text-red-600 disabled:opacity-50"
+                      disabled={deletingId === tag.id}
+                      onClick={() => void removeTag(tag)}
+                      aria-label={`Удалить ${tag.name}`}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 

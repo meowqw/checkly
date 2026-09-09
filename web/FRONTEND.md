@@ -4,7 +4,7 @@
 
 Связанный документ: [`../BACKEND.md`](../BACKEND.md)
 
-**Модель категорий:** плоский список (без `parent_id` / детей). У позиций чека — **теги** (`tags[]`, M2M), независимые от категории. API: `/v1/tags`, фильтр `tag_id`, PATCH item `{ category_id, tag_ids? }`.
+**Модель категорий:** плоский список (без `parent_id` / детей). У позиций (чек и ручная операция) — **теги** (`tags[]`, M2M), независимые от категории. API: `/v1/tags` (`usage_count`, сортировка по частоте), фильтр `tag_id`, create manual / PATCH item с `tag_ids?`.
 
 ---
 
@@ -302,9 +302,10 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 ### AddTransactionPage (`/add`)
 
 - Сумма в рублях → kopecks
-- expense/income, счёт, CategoryPicker (плоский), datetime-local
+- expense/income, счёт, CategoryPicker (плоский), **TagPicker** (до 5), datetime-local
+- `createTransaction` → body с опциональным `tag_ids`
 - `toApiDateTimeLocal()` — naive local ISO
-- **работает offline**
+- **работает offline** (`tag_ids` уходят в queue вместе с body)
 
 ### QrPage (`/qr`)
 
@@ -321,7 +322,7 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
   - список `members` (логин + роль)
   - owner: «Пригласить» → `createAccountInvite` → токен + копирование (**online**)
   - «Войти» → форма токена → `joinAccount` (**online**)
-- Categories: вкладки **Категории** | **Теги**; create/delete **online only**
+- Categories: вкладки **Категории** | **Теги**; create/delete **online only**; теги — поиск + сортировка по `usage_count`
 - Settings: профиль, links, logout
 
 ### LoginPage
@@ -387,7 +388,7 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 
 **Чеки** используют только **системные** категории и теги (бэкенд + LLM).
 
-Компоненты: `CategoryPicker` (single-select), `TagPicker` (multi, max 5), `CreateCategorySheet` (portal `z-[100]`), `ItemCategorySheet` (категория + теги)
+Компоненты: `CategoryPicker` (single-select), `TagPicker` (multi, max 5; поиск; часто используемые выше; свёртка «Ещё N»), `CreateCategorySheet` (portal `z-[100]`), `ItemCategorySheet` (категория + теги)
 
 ---
 
@@ -530,7 +531,7 @@ UI action
 | HTTP/types | `src/api/client.ts` |
 | Семейные счета | `AccountsPage`, `createAccountInvite` / `joinAccount` |
 | Фильтр категории / тега | `TransactionsPage` (`?category_id=` / `?tag_id=`), Dashboard → navigate |
-| Теги | `TagPicker`, `CategoriesPage` (вкладка), `getTags` / `createTag` |
+| Теги | `TagPicker`, `CategoriesPage` (вкладка + поиск), `getTags` / `createTag`, сортировка по `usage_count` |
 | Пагинация tx | `getTransactions` + `limit`/`offset`/`has_more` |
 | Статистика главной | `getStats`, `src/lib/stats.ts` |
 | Цвета категорий / dot | `src/lib/categories.ts` |

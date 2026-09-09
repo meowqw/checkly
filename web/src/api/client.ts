@@ -265,6 +265,7 @@ export type Tag = {
   icon?: string | null;
   color?: string | null;
   is_custom?: boolean;
+  usage_count?: number;
 };
 
 export type CreateTagBody = {
@@ -325,6 +326,7 @@ export type CreateTransactionBody = {
   occurred_at: string;
   category_id?: string;
   comment?: string;
+  tag_ids?: string[];
 };
 
 export function formatMoney(kopecks: number): string {

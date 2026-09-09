@@ -76,6 +76,11 @@ class CreateManualTransactionRequestDTO(BaseModel):
     occurred_at: datetime = Field(description="Дата и время (локальное, без timezone)")
     category_id: str | None = Field(default=None, description="UUID категории")
     comment: str | None = Field(default=None, description="Комментарий")
+    tag_ids: list[str] | None = Field(
+        default=None,
+        max_length=5,
+        description="Опционально: UUID тегов для позиции ручной операции (до 5)",
+    )
 
 
 class UpdateTransactionRequestDTO(BaseModel):
@@ -122,6 +127,7 @@ class CreateManualTransactionDTO(BaseModel):
     occurred_at: datetime
     category_uid: str | None = None
     comment: str | None = None
+    tag_uids: list[str] | None = None
     timezone: str = "Europe/Moscow"
 
 

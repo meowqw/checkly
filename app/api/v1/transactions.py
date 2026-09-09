@@ -107,6 +107,7 @@ def create_transaction(
         occurred_at=dto.occurred_at,
         category_uid=dto.category_id,
         comment=dto.comment,
+        tag_uids=dto.tag_ids,
         timezone=tz,
     )
     return TransactionService(db).create_manual_transaction(service_dto)

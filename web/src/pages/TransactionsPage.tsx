@@ -179,6 +179,16 @@ export default function TransactionsPage() {
     return tags.find((t) => t.id === tagId)?.name ?? "Тег";
   }, [tagId, tags]);
 
+  const tagsByUsage = useMemo(
+    () =>
+      [...tags].sort((a, b) => {
+        const usageDiff = (b.usage_count ?? 0) - (a.usage_count ?? 0);
+        if (usageDiff !== 0) return usageDiff;
+        return a.name.localeCompare(b.name, "ru");
+      }),
+    [tags]
+  );
+
   const grouped = useMemo(() => groupByDate(transactions), [transactions]);
 
   const totals = useMemo(() => {
@@ -297,7 +307,7 @@ export default function TransactionsPage() {
             onChange={(e) => syncTagToUrl(e.target.value)}
           >
             <option value="">Все теги</option>
-            {tags.map((t) => (
+            {tagsByUsage.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>

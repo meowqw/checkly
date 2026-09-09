@@ -168,14 +168,20 @@ class TransactionService:
         )
         self._transactions.create(transaction)
 
-        item = TransactionItem(
-            uid=new_uid(),
+        tags = []
+        if dto.tag_uids:
+            unique_uids = list(dict.fromkeys(dto.tag_uids))
+            tags = self._tag_service.resolve_tags_for_user(dto.user_id, unique_uids)
+        self._create_transaction_item(
             transaction_id=transaction.id,
-            category_id=category_id,
             raw_name=dto.comment or "Ручная операция",
+            quantity=None,
+            price=None,
             amount=dto.amount,
+            product=None,
+            category_id=category_id,
+            tags=tags,
         )
-        self._transactions.create_item(item)
 
         self._adjust_account_balance(account.id, dto.type, dto.amount)
         self._db.commit()

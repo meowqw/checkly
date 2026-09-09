@@ -2,10 +2,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import * as data from "@/api/data-service";
-import { rublesToKopecks, type Category } from "@/api/client";
+import { rublesToKopecks, type Category, type Tag } from "@/api/client";
 import { ApiError } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
 import { CategoryPicker } from "@/components/CategoryPicker";
+import { TagPicker } from "@/components/TagPicker";
 import { NoAccountsNotice } from "@/components/NoAccountsNotice";
 import { FormSkeleton } from "@/components/mobile/Skeleton";
 import { Button } from "@/components/ui/button";
@@ -17,9 +18,11 @@ export default function AddTransactionPage() {
   const navigate = useNavigate();
   const { accounts, loading: accountsLoading } = useAccounts();
   const [categories, setCategories] = useState<Category[]>([]);
+  const [tags, setTags] = useState<Tag[]>([]);
   const [accountId, setAccountId] = useState("");
   const [type, setType] = useState<"expense" | "income">("expense");
   const [categoryId, setCategoryId] = useState("");
+  const [tagIds, setTagIds] = useState<string[]>([]);
   const [amountRub, setAmountRub] = useState("");
   const [comment, setComment] = useState("");
   const [occurredAt, setOccurredAt] = useState(() => toDateTimeLocalValue());
@@ -35,11 +38,11 @@ export default function AddTransactionPage() {
 
   useEffect(() => {
     let cancelled = false;
-    data
-      .getCategories()
-      .then((cat) => {
+    void Promise.all([data.getCategories(), data.getTags()])
+      .then(([cat, tagRes]) => {
         if (cancelled) return;
         setCategories(cat.categories);
+        setTags(tagRes.tags);
         setInitialLoading(false);
       })
       .catch((err) => {
@@ -74,6 +77,7 @@ export default function AddTransactionPage() {
         occurred_at: toApiDateTimeLocal(occurredAt),
         category_id: categoryId || undefined,
         comment: comment || undefined,
+        tag_ids: tagIds.length > 0 ? tagIds : undefined,
       });
       navigate("/");
     } catch (err) {
@@ -173,6 +177,8 @@ export default function AddTransactionPage() {
           selectedId={categoryId}
           onChange={setCategoryId}
         />
+
+        <TagPicker tags={tags} selectedIds={tagIds} onChange={setTagIds} />
 
         <label className="block">
           <div className="mb-1 flex items-center justify-between">

@@ -244,15 +244,17 @@ HTTP → api/v1/*.py (тонкий контроллер)
 | POST | `/` | `{name, icon?, color?}` | `{tag}` — пользовательский |
 | DELETE | `/{tag_id}` | — | `{success: true}` — только свой |
 
-`TagDTO`: `{id, name, icon, color, is_custom}`
+`TagDTO`: `{id, name, icon, color, is_custom, usage_count}`
 
 - `user_id IS NULL` → системный тег (read-only)
 - `is_custom: true` → создан пользователем; delete разрешён
+- `usage_count` — сколько раз тег стоит на позициях **этого** пользователя (через `transaction_item_tags`)
+- Список (`GET /`) сортируется: **частота ↓**, затем имя
 - **Нет PATCH** (в отличие от категорий) — переименовать нельзя, только удалить и создать заново
 - Имя уникально среди системных + своих; дубликат → **409**
 - M2M: `transaction_item_tags`. В позициях API: `tags: [{id, name}]`
 
-Файлы: `app/api/v1/tags.py`, `app/services/tag_service.py`, `app/dto/tags.py`
+Файлы: `app/api/v1/tags.py`, `app/services/tag_service.py`, `app/repositories/tag_repository.py`, `app/dto/tags.py`
 
 ### 4.4 Transactions — `/v1/transactions`
 
@@ -293,10 +295,14 @@ HTTP → api/v1/*.py (тонкий контроллер)
   "currency": "RUB",
   "occurred_at": "2026-06-15T14:30:00",
   "category_id": "uuid|null",
-  "comment": "..."
+  "comment": "...",
+  "tag_ids": ["uuid", "..."]
 }
 ```
 
+- `tag_ids` — опционально, до **5** UUID; вешаются на единственную позицию ручной операции
+- без `tag_ids` / `null` / `[]` → тегов нет
+- неизвестный UUID → **404**
 **List item:** `{id, type, amount, currency, occurred_at, source, comment, title, account, merchant, category, items_count, items}`
 
 - `category` в list — **только manual**; для `qr_receipt` → `null`
@@ -504,7 +510,7 @@ POST /v1/receipts/qr
 
 `app/implementations/proverkacheka_receipt_provider.py`  
 POST `https://proverkacheka.com/api/v1/check/get`  
-Env: `PROVERKACHEKA_TOKEN`
+Env: `PROVERKACHEKA_TOKEN`, опционально `PROVERKACHEKA_PROXY` (`socks5h://user:pass@host:port` — только для этого запроса, не глобально)
 
 ### Product Normalizer (LLM)
 
@@ -592,6 +598,7 @@ Prompt: плоские категории + независимый словар�
 | `JWT_SECRET` | change-me... | ⚠️ обязателен в prod |
 | `JWT_EXPIRE_MINUTES` | 10080 | 7 дней |
 | `PROVERKACHEKA_TOKEN` | | QR чеки |
+| `PROVERKACHEKA_PROXY` | | SOCKS5 только для proverkacheka.com (`socks5h://…`); пусто = напрямую |
 | `PRODUCT_NORMALIZER` | auto | groq/grok/gpt/auto |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | | GPT |
 | `GROK_API_KEY`, `GROK_MODEL`, `GROK_BASE_URL` | | xAI |

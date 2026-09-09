@@ -8,6 +8,10 @@ class TagDTO(BaseModel):
     icon: str | None = Field(default=None, description="Иконка")
     color: str | None = Field(default=None, description="Цвет #RRGGBB")
     is_custom: bool = Field(default=False, description="Создан пользователем")
+    usage_count: int = Field(
+        default=0,
+        description="Сколько раз тег использован в позициях пользователя",
+    )
 
 
 class TagsListResponseDTO(BaseModel):

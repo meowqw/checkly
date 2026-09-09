@@ -21,6 +21,8 @@ class Settings(BaseSettings):
 
     # External APIs
     proverkacheka_token: str = ""
+    # Опциональный SOCKS5-прокси только для proverkacheka.com (socks5h://user:pass@host:port)
+    proverkacheka_proxy: str = ""
     # Нормализация товаров: auto | grok | gpt (auto — Grok, если задан GROK_API_KEY)
     product_normalizer: str = "auto"
     openai_api_key: str = ""

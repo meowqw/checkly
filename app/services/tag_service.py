@@ -15,8 +15,10 @@ class TagService:
         self._db = db
 
     def list_tags(self, user_id: int) -> TagsListResponseDTO:
-        tags = self._tags.list_for_user(user_id)
-        return TagsListResponseDTO(tags=[self._to_dto(t) for t in tags])
+        rows = self._tags.list_for_user(user_id)
+        return TagsListResponseDTO(
+            tags=[self._to_dto(tag, usage_count=count) for tag, count in rows]
+        )
 
     def create_tag(self, user_id: int, dto: CreateTagRequestDTO) -> TagResponseDTO:
         name = dto.name.strip()
@@ -31,7 +33,7 @@ class TagService:
         self._tags.create(tag)
         self._db.commit()
         self._db.refresh(tag)
-        return TagResponseDTO(tag=self._to_dto(tag))
+        return TagResponseDTO(tag=self._to_dto(tag, usage_count=0))
 
     def delete_tag(self, user_id: int, tag_uid: str) -> SuccessResponseDTO:
         tag = self._tags.get_user_tag(tag_uid, user_id)
@@ -66,11 +68,12 @@ class TagService:
         if existing:
             raise ConflictError("Тег с таким названием уже есть")
 
-    def _to_dto(self, tag: Tag) -> TagDTO:
+    def _to_dto(self, tag: Tag, *, usage_count: int = 0) -> TagDTO:
         return TagDTO(
             id=tag.uid,
             name=tag.name,
             icon=tag.icon,
             color=tag.color,
             is_custom=tag.user_id is not None,
+            usage_count=usage_count,
         )

@@ -28,12 +28,16 @@ class ProverkachekaReceiptProvider(ReceiptProviderInterface):
         if not settings.proverkacheka_token:
             raise ExternalServiceError("PROVERKACHEKA_TOKEN не задан")
 
+        request_kwargs: dict = {
+            "json": {"token": settings.proverkacheka_token, "qrraw": dto.qr},
+            "timeout": 30,
+        }
+        proxy = settings.proverkacheka_proxy.strip()
+        if proxy:
+            request_kwargs["proxies"] = {"http": proxy, "https": proxy}
+
         try:
-            response = requests.post(
-                PROVERKACHEKA_URL,
-                json={"token": settings.proverkacheka_token, "qrraw": dto.qr},
-                timeout=30,
-            )
+            response = requests.post(PROVERKACHEKA_URL, **request_kwargs)
             response.raise_for_status()
             payload = response.json()
         except requests.RequestException as exc:
