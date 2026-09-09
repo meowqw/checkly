@@ -181,7 +181,7 @@ AuthProvider
 Эндпоинты: `/v1/auth/*`, `/accounts` (+ `/join`, `/{id}/invites`), `/categories`,
 `/transactions` (`category_id`, `limit`/`offset`), `/receipts/qr`, **`/stats`** (`category_id`)
 
-Типы stats: `PeriodStats`, `CategoryStat` — `{ expense, income, categories[], recent_expenses[] }`
+Типы stats: `PeriodStats` — `{ expense, income, categories[], tags[], recent_expenses[] }`; `CategoryStat` / `TagStat`
 
 Типы счетов: `Account` + `members?: AccountMember[]` (`id`, `login`, `role`: `owner`|`member`).
 Хелперы: `myAccountRole`, `isAccountOwner`.
@@ -284,9 +284,10 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 - PeriodNavigator: day/week/month/**custom (от–до)** + стрелки (для preset)
 - Баланс (sum accounts), расходы/доходы из `stats.expense` / `stats.income`
 - Категории: `stats.categories` (с бэка, по позициям чеков); preview **5** + «ещё N»
+- Теги: `stats.tags` (тот же UI); тап с `tag_id` → `/transactions?tag_id=...`
 - Тап по категории с `category_id` → `/transactions?category_id=...`
 - Последние траты: `stats.recent_expenses` (до 8, compact с бэка)
-- Offline: `buildStatsFromTransactions()` из кэша tx + categories
+- Offline: `buildStatsFromTransactions()` из кэша tx + categories (+ `loadTagStats`)
 - UX: `DashboardSkeleton`, `RefreshBar` при фоновой revalidate
 - Без счетов → `NoAccountsNotice`
 

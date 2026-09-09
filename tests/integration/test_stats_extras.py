@@ -22,6 +22,7 @@ def test_stats_empty_period(db: Session, user: User, account: Account) -> None:
     assert stats.expense == 0
     assert stats.income == 0
     assert stats.categories == []
+    assert stats.tags == []
     assert stats.recent_expenses == []
 
 

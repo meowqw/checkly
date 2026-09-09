@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 
 from app.core.category_display import category_display_name
 from app.core.enums import TransactionType
-from app.database.models import Category
-from app.dto.stats import CategoryStatDTO, StatsResponseDTO
+from app.database.models import Category, Tag
+from app.dto.stats import CategoryStatDTO, StatsResponseDTO, TagStatDTO
 from app.dto.transactions import TransactionFilterDTO
 from app.repositories.category_repository import CategoryRepository
 from app.repositories.tag_repository import TagRepository
@@ -16,6 +16,7 @@ from app.services.transaction_queries import resolve_transaction_filters
 
 RECENT_EXPENSES_LIMIT = 8
 FALLBACK_CATEGORY = "Прочее"
+UNTAGGED_LABEL = "Без тега"
 
 
 class StatsService:
@@ -62,6 +63,14 @@ class StatsService:
             category_ids=category_ids,
             tag_ids=tag_ids,
         )
+        tags = self._build_tag_stats(
+            resolved.user_id,
+            from_date=resolved.from_date,
+            to_date=resolved.to_date,
+            account_id=resolved.account_id,
+            category_ids=category_ids,
+            tag_ids=tag_ids,
+        )
 
         recent_rows = self._transactions.list_recent_expenses(
             resolved.user_id,
@@ -78,6 +87,7 @@ class StatsService:
             expense=expense,
             income=income,
             categories=categories,
+            tags=tags,
             recent_expenses=recent,
         )
 
@@ -129,6 +139,54 @@ class StatsService:
         stats.sort(key=lambda row: row.amount, reverse=True)
         return stats
 
+    def _build_tag_stats(
+        self,
+        user_id: int,
+        *,
+        from_date: datetime | None,
+        to_date: datetime | None,
+        account_id: int | None,
+        category_ids: list[int] | None,
+        tag_ids: list[int] | None,
+    ) -> list[TagStatDTO]:
+        rows = self._transactions.aggregate_expense_tag_amounts(
+            user_id,
+            from_date=from_date,
+            to_date=to_date,
+            account_id=account_id,
+            category_ids=category_ids,
+            tag_ids=tag_ids,
+        )
+        if not rows:
+            return []
+
+        known_ids = [tid for tid, _ in rows if tid is not None]
+        tags_by_id = self._transactions.get_tags_by_ids(known_ids)
+
+        totals: dict[str, tuple[int, str | None, str | None]] = {}
+        for tag_id, amount in rows:
+            name, uid, color = self._tag_meta(tag_id, tags_by_id)
+            prev_amount, prev_uid, prev_color = totals.get(name, (0, None, None))
+            totals[name] = (
+                prev_amount + amount,
+                prev_uid or uid,
+                prev_color or color,
+            )
+
+        total_amount = sum(amount for amount, _, _ in totals.values()) or 1
+        stats = [
+            TagStatDTO(
+                tag_id=uid,
+                name=name,
+                amount=amount,
+                percent=round(amount / total_amount * 100),
+                color=color,
+            )
+            for name, (amount, uid, color) in totals.items()
+        ]
+        stats.sort(key=lambda row: row.amount, reverse=True)
+        return stats
+
     @staticmethod
     def _category_meta(
         category_id: int | None, categories_by_id: dict[int, Category]
@@ -139,3 +197,14 @@ class StatsService:
         if not cat:
             return FALLBACK_CATEGORY, None, None
         return category_display_name(cat) or FALLBACK_CATEGORY, cat.uid, cat.color
+
+    @staticmethod
+    def _tag_meta(
+        tag_id: int | None, tags_by_id: dict[int, Tag]
+    ) -> tuple[str, str | None, str | None]:
+        if tag_id is None:
+            return UNTAGGED_LABEL, None, None
+        tag = tags_by_id.get(tag_id)
+        if not tag:
+            return UNTAGGED_LABEL, None, None
+        return tag.name, tag.uid, tag.color

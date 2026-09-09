@@ -10,6 +10,7 @@ from app.core.enums import TransactionType
 from app.database.models import (
     Account,
     Category,
+    Tag,
     Transaction,
     TransactionItem,
     TransactionItemTag,
@@ -296,11 +297,116 @@ class TransactionRepository:
 
         return list(totals.items())
 
+    def aggregate_expense_tag_amounts(
+        self,
+        user_id: int,
+        *,
+        from_date: datetime | None = None,
+        to_date: datetime | None = None,
+        account_id: int | None = None,
+        category_ids: list[int] | None = None,
+        tag_ids: list[int] | None = None,
+    ) -> list[tuple[int | None, int]]:
+        """Суммы расходов по tag_id (None = «Без тега»).
+
+        Позиция с несколькими тегами добавляет полную сумму в каждый тег.
+        """
+        totals: dict[int | None, int] = {}
+
+        tagged_stmt = (
+            select(
+                TransactionItemTag.tag_id,
+                func.coalesce(func.sum(TransactionItem.amount), 0),
+            )
+            .join(TransactionItem, TransactionItem.id == TransactionItemTag.item_id)
+            .join(Transaction, Transaction.id == TransactionItem.transaction_id)
+            .where(
+                self._accessible_account_ids(user_id),
+                Transaction.type == TransactionType.EXPENSE.value,
+            )
+        )
+        if category_ids is not None:
+            tagged_stmt = tagged_stmt.where(TransactionItem.category_id.in_(category_ids))
+        if tag_ids is not None:
+            tagged_stmt = tagged_stmt.where(TransactionItemTag.tag_id.in_(tag_ids))
+        tagged_stmt = self._apply_filters(
+            tagged_stmt,
+            from_date=from_date,
+            to_date=to_date,
+            account_id=account_id,
+            model=Transaction,
+        )
+        tagged_stmt = tagged_stmt.group_by(TransactionItemTag.tag_id)
+        for tag_id, amount in self._db.execute(tagged_stmt).all():
+            totals[tag_id] = totals.get(tag_id, 0) + int(amount)
+
+        # Позиции без тегов (в scope фильтров)
+        has_tag = exists(
+            select(TransactionItemTag.item_id).where(
+                TransactionItemTag.item_id == TransactionItem.id
+            )
+        )
+        untagged_stmt = (
+            select(func.coalesce(func.sum(TransactionItem.amount), 0))
+            .join(Transaction, Transaction.id == TransactionItem.transaction_id)
+            .where(
+                self._accessible_account_ids(user_id),
+                Transaction.type == TransactionType.EXPENSE.value,
+                ~has_tag,
+            )
+        )
+        if category_ids is not None:
+            untagged_stmt = untagged_stmt.where(TransactionItem.category_id.in_(category_ids))
+        if tag_ids is not None:
+            # при фильтре по тегу позиции без тегов не попадают в scope
+            untagged_amount = 0
+        else:
+            untagged_stmt = self._apply_filters(
+                untagged_stmt,
+                from_date=from_date,
+                to_date=to_date,
+                account_id=account_id,
+                model=Transaction,
+            )
+            untagged_amount = int(self._db.scalar(untagged_stmt) or 0)
+        if untagged_amount:
+            totals[None] = totals.get(None, 0) + untagged_amount
+
+        # Транзакции без позиций — только без category/tag фильтра
+        if category_ids is None and tag_ids is None:
+            has_items = exists(
+                select(TransactionItem.id).where(
+                    TransactionItem.transaction_id == Transaction.id
+                )
+            )
+            orphan_stmt = select(func.coalesce(func.sum(Transaction.amount), 0)).where(
+                self._accessible_account_ids(user_id),
+                Transaction.type == TransactionType.EXPENSE.value,
+                ~has_items,
+            )
+            orphan_stmt = self._apply_filters(
+                orphan_stmt,
+                from_date=from_date,
+                to_date=to_date,
+                account_id=account_id,
+            )
+            orphan_amount = int(self._db.scalar(orphan_stmt) or 0)
+            if orphan_amount:
+                totals[None] = totals.get(None, 0) + orphan_amount
+
+        return list(totals.items())
+
     def get_categories_by_ids(self, category_ids: list[int]) -> dict[int, Category]:
         if not category_ids:
             return {}
         stmt = select(Category).where(Category.id.in_(category_ids))
         return {c.id: c for c in self._db.scalars(stmt).all()}
+
+    def get_tags_by_ids(self, tag_ids: list[int]) -> dict[int, Tag]:
+        if not tag_ids:
+            return {}
+        stmt = select(Tag).where(Tag.id.in_(tag_ids))
+        return {t.id: t for t in self._db.scalars(stmt).all()}
 
     def get_item_by_uid_for_user(
         self, item_uid: str, transaction_uid: str, user_id: int

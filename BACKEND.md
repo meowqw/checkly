@@ -342,6 +342,9 @@ HTTP → api/v1/*.py (тонкий контроллер)
   "categories": [
     { "category_id": "uuid|null", "name": "Продукты", "amount": 4500, "percent": 12, "color": "#16a34a" }
   ],
+  "tags": [
+    { "tag_id": "uuid|null", "name": "Молочные", "amount": 70000, "percent": 40, "color": null }
+  ],
   "recent_expenses": [ /* до 8 TransactionListItemDTO, compact */ ]
 }
 ```
@@ -350,15 +353,16 @@ HTTP → api/v1/*.py (тонкий контроллер)
 - Без `category_id`/`tag_id`: `expense` / `income` — `SUM(transaction.amount)` по типу (SQL)
 - С фильтром: суммы по **позициям** (`transaction_items`) в scope; `category_id` — exact, `tag_id` — через M2M
 - `categories` — **только расходы**; для чеков суммируются **позиции** по плоской категории
-- транзакции **без позиций** → сумма tx в «Прочее» (**только** без фильтров category/tag)
-- `percent` — доля от суммы категорийных расходов в текущей выборке
-- `color` — из категории
+- `tags` — **только расходы** по тегам позиций; позиция с **несколькими** тегами добавляет **полную** сумму в каждый тег; без тегов / tx без позиций → «Без тега» (`tag_id: null`)
+- транзакции **без позиций** → сумма tx в «Прочее» / «Без тега» (**только** без фильтров category/tag)
+- `percent` у категорий — доля от суммы категорийной разбивки; у тегов — доля от суммы теговой разбивки (может ≠ expense из‑за multi-tag)
+- `color` — из категории/тега
 - `recent_expenses` — `LIMIT 8` расходов; при фильтре — только tx с позицией в scope; `compact=True`
 
 Query **`type` нет** — stats всегда считает и расходы, и доходы (в рамках фильтров).
 
 Реализация: SQL в repo —
-`sum_amounts_by_type` / `sum_item_amounts_by_type`, `aggregate_expense_category_amounts`, `list_recent_expenses`.
+`sum_amounts_by_type` / `sum_item_amounts_by_type`, `aggregate_expense_category_amounts`, `aggregate_expense_tag_amounts`, `list_recent_expenses`.
 
 Файлы: `app/api/v1/stats.py`, `app/services/stats_service.py`, `app/dto/stats.py`, `app/repositories/transaction_repository.py`, `app/services/transaction_queries.py`
 

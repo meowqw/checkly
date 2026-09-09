@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ChevronDown, ChevronUp, ScanLine } from "lucide-react";
 import * as data from "@/api/data-service";
-import { formatMoney, type CategoryStat, type PeriodStats } from "@/api/client";
+import { formatMoney, type CategoryStat, type PeriodStats, type TagStat } from "@/api/client";
 import { useAccounts } from "@/context/AccountsContext";
 import { CategoryProgress } from "@/components/dashboard/CategoryProgress";
 import { NoAccountsNotice } from "@/components/NoAccountsNotice";
@@ -30,6 +30,7 @@ type TxRowData = {
 };
 
 const CATEGORY_PREVIEW = 5;
+const TAG_PREVIEW = 5;
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -47,12 +48,14 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState(0);
   const [income, setIncome] = useState(0);
   const [categories, setCategories] = useState<CategoryStat[]>([]);
+  const [tags, setTags] = useState<TagStat[]>([]);
   const [transactions, setTransactions] = useState<TxRowData[]>([]);
   const [booting, setBooting] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
   const [categoriesExpanded, setCategoriesExpanded] = useState(false);
+  const [tagsExpanded, setTagsExpanded] = useState(false);
   const hasEverLoaded = useRef(false);
 
   const range = useMemo(() => {
@@ -70,6 +73,7 @@ export default function DashboardPage() {
     setExpenses(stats.expense);
     setIncome(stats.income);
     setCategories(stats.categories);
+    setTags(stats.tags ?? []);
     const colorMap = colorMapFromStats(stats.categories);
     setTransactions(
       stats.recent_expenses.map((t) => {
@@ -130,10 +134,13 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setCategoriesExpanded(false);
-  }, [period, periodAnchor.getTime()]);
+    setTagsExpanded(false);
+  }, [period, periodAnchor.getTime(), customFrom, customTo]);
 
   const visibleCategories = categoriesExpanded ? categories : categories.slice(0, CATEGORY_PREVIEW);
   const hiddenCategoryCount = Math.max(0, categories.length - CATEGORY_PREVIEW);
+  const visibleTags = tagsExpanded ? tags : tags.slice(0, TAG_PREVIEW);
+  const hiddenTagCount = Math.max(0, tags.length - TAG_PREVIEW);
 
   if (booting && !loaded) {
     return <DashboardSkeleton />;
@@ -228,6 +235,56 @@ export default function DashboardPage() {
                 onClick={
                   c.category_id
                     ? () => navigate(`/transactions?category_id=${encodeURIComponent(c.category_id!)}`)
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {tags.length > 0 && (
+        <section className="mb-5">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h2 className="section-title">Теги</h2>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {hiddenTagCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setTagsExpanded((v) => !v)}
+                  className="inline-flex items-center gap-0.5 rounded-md px-1.5 py-0.5 text-[11px] font-medium text-neutral-500 transition-colors hover:bg-neutral-100 hover:text-neutral-700"
+                  aria-expanded={tagsExpanded}
+                  aria-label={
+                    tagsExpanded ? "Свернуть список тегов" : `Показать ещё ${hiddenTagCount} тегов`
+                  }
+                >
+                  {tagsExpanded ? (
+                    <>
+                      <ChevronUp size={13} />
+                      <span>Свернуть</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown size={13} />
+                      <span>+{hiddenTagCount}</span>
+                    </>
+                  )}
+                </button>
+              )}
+              <span className="text-[11px] text-neutral-400">{formatMoney(expenses)}</span>
+            </div>
+          </div>
+          <div className="space-y-3 stagger-in">
+            {visibleTags.map((t) => (
+              <CategoryProgress
+                key={`${t.tag_id ?? "none"}:${t.name}`}
+                name={t.name}
+                amount={formatStatAmount(t.amount)}
+                percent={t.percent}
+                color={t.color ?? undefined}
+                onClick={
+                  t.tag_id
+                    ? () => navigate(`/transactions?tag_id=${encodeURIComponent(t.tag_id!)}`)
                     : undefined
                 }
               />

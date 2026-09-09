@@ -77,3 +77,4 @@ def test_stats_api(
     assert data["expense"] == 250_00
     assert data["income"] == 0
     assert data["categories"]
+    assert "tags" in data

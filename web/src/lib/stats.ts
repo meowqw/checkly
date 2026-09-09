@@ -1,15 +1,20 @@
-import { formatMoney, type Category, type CategoryStat, type PeriodStats, type Transaction } from "@/api/client";
+import { formatMoney, type Category, type CategoryStat, type PeriodStats, type TagStat, type Transaction } from "@/api/client";
 import { buildCategoryDisplayMap, getCategoryGroupName } from "@/lib/categories";
 import { resolveCategoryColor } from "@/lib/category-icons";
 import { parseApiDateTime } from "@/lib/dates";
 import { sourceLabel } from "@/lib/transactions";
 
-export type { CategoryStat };
+export type { CategoryStat, TagStat };
 
 type TxWithItems = Transaction & {
   title?: string;
   category?: string | null;
-  items?: Array<{ category_id?: string | null; amount: number; category?: { name: string } }>;
+  items?: Array<{
+    category_id?: string | null;
+    amount: number;
+    category?: { name: string };
+    tags?: Array<{ id: string; name: string }>;
+  }>;
 };
 
 function resolveItemCategoryName(
@@ -32,12 +37,14 @@ export function buildStatsFromTransactions(
   const incomeTx = transactions.filter((t) => t.type === "income");
 
   const categories = loadCategoryStats(expenseTx, categoriesTree).map((row) => ({
-    category_id: null,
+    category_id: null as string | null,
     name: row.name,
     amount: row.amount,
     percent: row.percent,
     color: row.color ?? null,
   }));
+
+  const tags = loadTagStats(expenseTx);
 
   const recent_expenses = [...expenseTx]
     .sort(
@@ -49,6 +56,7 @@ export function buildStatsFromTransactions(
     expense: expenseTx.reduce((sum, t) => sum + t.amount, 0),
     income: incomeTx.reduce((sum, t) => sum + t.amount, 0),
     categories,
+    tags,
     recent_expenses,
   };
 }
@@ -94,6 +102,52 @@ function resolveStatColorForLabel(categories: Category[], label: string): string
   const found = categories.find((c) => c.name === label);
   if (found) return resolveCategoryColor(found.color, found.name);
   return undefined;
+}
+
+/** Offline: разбивка по тегам позиций (multi-tag — полная сумма в каждом). */
+export function loadTagStats(expenseTx: Transaction[]): TagStat[] {
+  if (expenseTx.length === 0) return [];
+
+  const totals = new Map<string, { amount: number; tag_id: string | null }>();
+
+  const add = (name: string, amount: number, tagId: string | null) => {
+    const prev = totals.get(name);
+    if (prev) {
+      prev.amount += amount;
+      if (!prev.tag_id && tagId) prev.tag_id = tagId;
+    } else {
+      totals.set(name, { amount, tag_id: tagId });
+    }
+  };
+
+  for (const raw of expenseTx) {
+    const tx = raw as TxWithItems;
+    if (tx.items?.length) {
+      for (const item of tx.items) {
+        const tags = item.tags ?? [];
+        if (tags.length === 0) {
+          add("Без тега", item.amount, null);
+        } else {
+          for (const tag of tags) {
+            add(tag.name, item.amount, tag.id);
+          }
+        }
+      }
+    } else {
+      add("Без тега", tx.amount, null);
+    }
+  }
+
+  const total = [...totals.values()].reduce((a, b) => a + b.amount, 0) || 1;
+  return [...totals.entries()]
+    .map(([name, row]) => ({
+      tag_id: row.tag_id,
+      name,
+      amount: row.amount,
+      percent: Math.round((row.amount / total) * 100),
+      color: null,
+    }))
+    .sort((a, b) => b.amount - a.amount);
 }
 
 export function formatStatAmount(kopecks: number): string {

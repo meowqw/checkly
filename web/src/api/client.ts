@@ -201,10 +201,19 @@ export type CategoryStat = {
   color?: string | null;
 };
 
+export type TagStat = {
+  tag_id?: string | null;
+  name: string;
+  amount: number;
+  percent: number;
+  color?: string | null;
+};
+
 export type PeriodStats = {
   expense: number;
   income: number;
   categories: CategoryStat[];
+  tags?: TagStat[];
   recent_expenses: Transaction[];
 };
 

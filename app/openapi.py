@@ -27,6 +27,7 @@ REST API учёта личных финансов (**Checkly**).
   `GET /v1/tags` — `usage_count` и сортировка по частоте ↓.
 - Ручная операция: `POST /v1/transactions` принимает опциональный `tag_ids` (до 5 UUID).
 - Правка позиции чека: `PATCH /v1/transactions/{id}/items/{item_id}` с `category_id` и опционально `tag_ids`.
+- Статистика: `GET /v1/stats` — `categories[]` и `tags[]` (разбивка расходов за период).
 
 ## Чеки (QR)
 
@@ -57,7 +58,7 @@ OPENAPI_TAGS = [
         "description": "Транзакции: список с фильтрами, ручное создание (в т.ч. tag_ids), правка позиций",
     },
     {"name": "receipts", "description": "Импорт чеков по QR-коду (proverkacheka)"},
-    {"name": "stats", "description": "Статистика и агрегаты за период from/to"},
+    {"name": "stats", "description": "Статистика: expense/income, разбивка categories[] и tags[], recent_expenses"},
 ]
 
 COMMON_ERROR_RESPONSES: dict[int, dict] = {
