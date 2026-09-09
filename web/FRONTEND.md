@@ -281,7 +281,7 @@ Pub/sub вне React: `subscribeAccountsChanged`, `subscribeTransactionsChanged`
 ### DashboardPage (`/`)
 
 - **Один запрос** `getStats(periodParams)` — не тянет полный `/transactions`
-- PeriodNavigator: day/week/month + стрелки
+- PeriodNavigator: day/week/month/**custom (от–до)** + стрелки (для preset)
 - Баланс (sum accounts), расходы/доходы из `stats.expense` / `stats.income`
 - Категории: `stats.categories` (с бэка, по позициям чеков); preview **5** + «ещё N»
 - Тап по категории с `category_id` → `/transactions?category_id=...`
@@ -396,8 +396,8 @@ Offline merge фильтрует через `parseRangeBound()` в `cache.ts`.
 
 | Файл | Назначение |
 |------|------------|
-| `PeriodNavigator` | табы + ← label → |
-| `PeriodTabs` | День / Неделя / Месяц |
+| `PeriodNavigator` | табы + ← label → / date inputs для «Свои» |
+| `PeriodTabs` | День / Неделя / Месяц / Свои |
 | `TxRow` | строка операции; prop **`dotColor`** (null = чек) |
 | `RefreshBar` | тонкая полоска сверху при фоновом refresh |
 | `Skeleton` | `DashboardSkeleton` и др. placeholder |
@@ -478,7 +478,8 @@ Dev: `npm run dev` → `:5173`
 - Читать/писать через **`data-service`**
 - **Главная**: `getStats`, не `getTransactions`
 - Суммы: **`rublesToKopecks` / `formatMoney`**
-- Фильтры: **`getPeriodRange` + `toApiDateTimeRange`**; категория — `category_id`, тег — `tag_id`
+- Фильтры: **`getPeriodRange` / `getCustomPeriodRange` + `toApiDateTimeRange`**; таб **Свои** (от–до); категория — `category_id`, тег — `tag_id`
+- Android back: **`useAndroidBackButton`** (`@capacitor/app`) — с `/add`/`/qr` назад, не выход из приложения
 - Списки tx: подписка **`subscribeTransactionsChanged`** (главная перезагружает stats)
 - Цвета маркеров: **`resolveTransactionDotColor`** + color map
 - Счета: **`useAccounts()`**; пустой список → **`NoAccountsNotice`**

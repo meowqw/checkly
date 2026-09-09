@@ -23,9 +23,9 @@ class CategoryService:
         self._db = db
 
     def list_categories(self, user_id: int) -> CategoriesListResponseDTO:
-        categories = self._categories.list_for_user(user_id)
+        rows = self._categories.list_for_user(user_id)
         return CategoriesListResponseDTO(
-            categories=[self._to_dto(c) for c in categories]
+            categories=[self._to_dto(c, usage_count=count) for c, count in rows]
         )
 
     def create_category(self, user_id: int, dto: CreateCategoryRequestDTO) -> CategoryResponseDTO:
@@ -43,7 +43,7 @@ class CategoryService:
         self._categories.create(category)
         self._db.commit()
         self._db.refresh(category)
-        return CategoryResponseDTO(category=self._to_dto(category))
+        return CategoryResponseDTO(category=self._to_dto(category, usage_count=0))
 
     def update_category(
         self, user_id: int, category_uid: str, dto: UpdateCategoryRequestDTO
@@ -64,7 +64,7 @@ class CategoryService:
             category.color = dto.color
         self._db.commit()
         self._db.refresh(category)
-        return CategoryResponseDTO(category=self._to_dto(category))
+        return CategoryResponseDTO(category=self._to_dto(category, usage_count=0))
 
     def delete_category(self, user_id: int, category_uid: str) -> SuccessResponseDTO:
         category = self._get_user_owned_category(category_uid, user_id)
@@ -109,7 +109,7 @@ class CategoryService:
         if existing:
             raise ConflictError("Категория с таким названием уже есть")
 
-    def _to_dto(self, category: Category) -> CategoryDTO:
+    def _to_dto(self, category: Category, *, usage_count: int = 0) -> CategoryDTO:
         return CategoryDTO(
             id=category.uid,
             name=category.name,
@@ -117,4 +117,5 @@ class CategoryService:
             icon=category.icon,
             color=category.color,
             is_custom=category.user_id is not None,
+            usage_count=usage_count,
         )

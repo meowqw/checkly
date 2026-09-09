@@ -92,7 +92,11 @@ def list_transactions(
     "",
     response_model=TransactionResponseDTO,
     summary="Создать транзакцию",
-    description="Ручная запись дохода или расхода. Сумма — в копейках.",
+    description=(
+        "Ручная запись дохода или расхода. Сумма — в копейках.\n\n"
+        "Опционально `tag_ids` (до 5 UUID) — теги единственной позиции операции. "
+        "Без поля / null / [] — тегов нет."
+    ),
     responses={**_AUTH_ERRORS, 400: COMMON_ERROR_RESPONSES[400], 404: COMMON_ERROR_RESPONSES[404]},
 )
 def create_transaction(

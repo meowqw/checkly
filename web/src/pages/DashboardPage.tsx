@@ -13,7 +13,7 @@ import { TxRow } from "@/components/mobile/TxRow";
 import { Button } from "@/components/ui/button";
 import { trackBackgroundFresh } from "@/lib/cache-first";
 import { resolveTransactionDotColor } from "@/lib/categories";
-import { getPeriodRange, toApiDateTimeRange, type Period } from "@/lib/dates";
+import { getCustomPeriodRange, getPeriodRange, toApiDate, toApiDateTimeRange, type Period } from "@/lib/dates";
 import { subscribeTransactionsChanged } from "@/lib/data-events";
 import { colorMapFromStats, formatStatAmount, txRowFromList } from "@/lib/stats";
 
@@ -36,6 +36,14 @@ export default function DashboardPage() {
   const { accounts, loading: accountsLoading } = useAccounts();
   const [period, setPeriod] = useState<Period>("day");
   const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
+  const [customFrom, setCustomFrom] = useState(() => {
+    const m = getPeriodRange("month", new Date());
+    return toApiDate(m.from);
+  });
+  const [customTo, setCustomTo] = useState(() => {
+    const m = getPeriodRange("month", new Date());
+    return toApiDate(m.to);
+  });
   const [expenses, setExpenses] = useState(0);
   const [income, setIncome] = useState(0);
   const [categories, setCategories] = useState<CategoryStat[]>([]);
@@ -47,7 +55,10 @@ export default function DashboardPage() {
   const [categoriesExpanded, setCategoriesExpanded] = useState(false);
   const hasEverLoaded = useRef(false);
 
-  const range = useMemo(() => getPeriodRange(period, periodAnchor), [period, periodAnchor.getTime()]);
+  const range = useMemo(() => {
+    if (period === "custom") return getCustomPeriodRange(customFrom, customTo);
+    return getPeriodRange(period, periodAnchor);
+  }, [period, periodAnchor.getTime(), customFrom, customTo]);
   const balance = accounts.reduce((s, a) => s + a.balance, 0);
 
   const periodParams = useMemo(
@@ -166,6 +177,12 @@ export default function DashboardPage() {
         anchor={periodAnchor}
         onPeriodChange={setPeriod}
         onAnchorChange={setPeriodAnchor}
+        customFrom={customFrom}
+        customTo={customTo}
+        onCustomRangeChange={(from, to) => {
+          setCustomFrom(from);
+          setCustomTo(to);
+        }}
         className="mb-4"
       />
 

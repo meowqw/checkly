@@ -244,6 +244,7 @@ export type Category = {
   icon?: string | null;
   color?: string | null;
   is_custom?: boolean;
+  usage_count?: number;
 };
 
 export type CreateCategoryBody = {

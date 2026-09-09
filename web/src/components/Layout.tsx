@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
   Home,
@@ -14,6 +14,7 @@ import { useSync } from "@/context/SyncContext";
 import { MenuItem } from "@/components/dashboard/MenuItem";
 import { NoAccountsNotice } from "@/components/NoAccountsNotice";
 import { FabActionMenu, FabButton } from "@/components/mobile/FabActionMenu";
+import { useAndroidBackButton } from "@/hooks/useAndroidBackButton";
 import { cn } from "@/lib/utils";
 
 const HIDE_NAV = ["/add", "/qr"];
@@ -26,6 +27,16 @@ export default function Layout() {
   const hideNav = HIDE_NAV.some((p) => location.pathname.startsWith(p));
   const needsAccount = !accountsLoading && accounts.length === 0;
   const onAccountsPage = location.pathname.startsWith("/accounts");
+
+  const interceptBack = useCallback(() => {
+    if (fabOpen) {
+      setFabOpen(false);
+      return true;
+    }
+    return false;
+  }, [fabOpen]);
+
+  useAndroidBackButton({ intercept: interceptBack });
 
   useEffect(() => {
     setFabOpen(false);

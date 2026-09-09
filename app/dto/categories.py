@@ -11,6 +11,10 @@ class CategoryDTO(BaseModel):
     icon: str | None = Field(default=None, description="Иконка (эмодзи или код)")
     color: str | None = Field(default=None, description="Цвет в формате #RRGGBB")
     is_custom: bool = Field(default=False, description="Создана пользователем")
+    usage_count: int = Field(
+        default=0,
+        description="Сколько раз категория использована в позициях пользователя",
+    )
 
 
 class CategoriesListResponseDTO(BaseModel):

@@ -14,7 +14,7 @@ import { TxRowsOnlySkeleton } from "@/components/mobile/Skeleton";
 import { TxRow } from "@/components/mobile/TxRow";
 import { Button } from "@/components/ui/button";
 import { trackBackgroundFresh } from "@/lib/cache-first";
-import { getPeriodRange, toApiDateTimeRange, type Period } from "@/lib/dates";
+import { getCustomPeriodRange, getPeriodRange, toApiDate, toApiDateTimeRange, type Period } from "@/lib/dates";
 import { subscribeTransactionsChanged } from "@/lib/data-events";
 import { groupByDate, sourceLabel, type TransactionListItem } from "@/lib/transactions";
 import { buildCategoryColorMap, findCategoryById, resolveTransactionDotColor } from "@/lib/categories";
@@ -28,6 +28,14 @@ export default function TransactionsPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [period, setPeriod] = useState<Period>("month");
   const [periodAnchor, setPeriodAnchor] = useState(() => new Date());
+  const [customFrom, setCustomFrom] = useState(() => {
+    const m = getPeriodRange("month", new Date());
+    return toApiDate(m.from);
+  });
+  const [customTo, setCustomTo] = useState(() => {
+    const m = getPeriodRange("month", new Date());
+    return toApiDate(m.to);
+  });
   const [transactions, setTransactions] = useState<TransactionListItem[]>([]);
   const [categoryTree, setCategoryTree] = useState<Category[]>([]);
   const [tags, setTags] = useState<Tag[]>([]);
@@ -48,7 +56,10 @@ export default function TransactionsPage() {
     txType: "expense" | "income";
   } | null>(null);
 
-  const range = useMemo(() => getPeriodRange(period, periodAnchor), [period, periodAnchor.getTime()]);
+  const range = useMemo(() => {
+    if (period === "custom") return getCustomPeriodRange(customFrom, customTo);
+    return getPeriodRange(period, periodAnchor);
+  }, [period, periodAnchor.getTime(), customFrom, customTo]);
 
   const baseParams = useMemo(() => {
     const params: Record<string, string> = toApiDateTimeRange(range.from, range.to);
@@ -251,6 +262,12 @@ export default function TransactionsPage() {
         anchor={periodAnchor}
         onPeriodChange={setPeriod}
         onAnchorChange={setPeriodAnchor}
+        customFrom={customFrom}
+        customTo={customTo}
+        onCustomRangeChange={(from, to) => {
+          setCustomFrom(from);
+          setCustomTo(to);
+        }}
         className="mb-1"
       />
 

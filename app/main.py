@@ -62,7 +62,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Checkly (Finance Manager) API",
         description=API_DESCRIPTION,
-        version="1.0.0",
+        version="1.1.0",
         debug=settings.app_debug,
         openapi_tags=OPENAPI_TAGS,
     )

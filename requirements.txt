@@ -16,6 +16,7 @@ bcrypt==4.2.1
 
 # HTTP / AI
 requests[socks]==2.32.3
+PySocks==1.7.1
 openai==1.57.4
 
 # Utils

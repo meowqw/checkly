@@ -1,4 +1,4 @@
-export type Period = "day" | "week" | "month";
+export type Period = "day" | "week" | "month" | "custom";
 
 export type PeriodRange = { from: Date; to: Date; label: string; anchor: Date };
 
@@ -51,8 +51,8 @@ function formatMonthLabel(from: Date, to: Date): string {
   return `${f} – ${t}`;
 }
 
-/** Календарный период относительно anchor (по умолчанию — сегодня). */
-export function getPeriodRange(period: Period, anchor: Date = new Date()): PeriodRange {
+/** Календарный период относительно anchor (по умолчанию — сегодня). Не для custom. */
+export function getPeriodRange(period: Exclude<Period, "custom">, anchor: Date = new Date()): PeriodRange {
   const ref = new Date(anchor);
   ref.setHours(12, 0, 0, 0);
 
@@ -76,8 +76,36 @@ export function getPeriodRange(period: Period, anchor: Date = new Date()): Perio
   return { from, to, label: formatMonthLabel(from, to), anchor: monthAnchor };
 }
 
-/** Сдвиг anchor на предыдущий/следующий период. */
-export function shiftPeriodAnchor(period: Period, anchor: Date, delta: -1 | 1): Date {
+/** Произвольный диапазон from/to (YYYY-MM-DD). */
+export function getCustomPeriodRange(fromStr: string, toStr: string): PeriodRange {
+  const parse = (s: string, end: boolean) => {
+    const [y, m, d] = s.split("-").map(Number);
+    if (!y || !m || !d) {
+      const now = new Date();
+      return end
+        ? new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+        : new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    }
+    return end
+      ? new Date(y, m - 1, d, 23, 59, 59, 999)
+      : new Date(y, m - 1, d, 0, 0, 0, 0);
+  };
+  let from = parse(fromStr, false);
+  let to = parse(toStr, true);
+  if (to.getTime() < from.getTime()) {
+    const tmp = from;
+    from = new Date(to.getFullYear(), to.getMonth(), to.getDate(), 0, 0, 0, 0);
+    to = new Date(tmp.getFullYear(), tmp.getMonth(), tmp.getDate(), 23, 59, 59, 999);
+  }
+  return { from, to, label: formatWeekLabel(from, to), anchor: from };
+}
+
+/** Сдвиг anchor на предыдущий/следующий период (не для custom). */
+export function shiftPeriodAnchor(
+  period: Exclude<Period, "custom">,
+  anchor: Date,
+  delta: -1 | 1
+): Date {
   const next = new Date(anchor);
   if (period === "day") {
     next.setDate(next.getDate() + delta);
@@ -90,7 +118,7 @@ export function shiftPeriodAnchor(period: Period, anchor: Date, delta: -1 | 1): 
 }
 
 /** Можно ли листать вперёд (ещё не текущий период). */
-export function canGoPeriodNext(period: Period, anchor: Date): boolean {
+export function canGoPeriodNext(period: Exclude<Period, "custom">, anchor: Date): boolean {
   const { anchor: currentAnchor } = getPeriodRange(period, new Date());
   const { anchor: viewAnchor } = getPeriodRange(period, anchor);
   return viewAnchor.getTime() < currentAnchor.getTime();

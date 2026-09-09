@@ -89,7 +89,8 @@ export function TagPicker({ tags, selectedIds, onChange, max = 5 }: Props) {
       <div className="relative">
         <Search
           size={14}
-          className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400"
+          className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-neutral-400"
+          aria-hidden
         />
         <input
           type="search"
@@ -99,7 +100,7 @@ export function TagPicker({ tags, selectedIds, onChange, max = 5 }: Props) {
             if (e.target.value.trim()) setExpanded(true);
           }}
           placeholder="Найти тег…"
-          className="input-field w-full py-2 pl-8 pr-3 text-sm"
+          className="w-full rounded-xl border border-neutral-200 bg-neutral-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-brand focus:bg-white"
           enterKeyHint="search"
         />
       </div>

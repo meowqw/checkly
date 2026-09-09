@@ -224,7 +224,7 @@ HTTP → api/v1/*.py (тонкий контроллер)
 | PATCH | `/{category_id}` | `{name?, icon?, color?}` | `{category}` |
 | DELETE | `/{category_id}` | — | `{success: true}` |
 
-`CategoryDTO`: `{id, name, type, icon, color, is_custom}`
+`CategoryDTO`: `{id, name, type, icon, color, is_custom, usage_count}` — список: по типу, затем **частота ↓**, имя
 
 - **Нет иерархии** (нет `parent_id` / `children` / подкатегорий)
 - `user_id IS NULL` → системная категория (read-only для пользователя)
@@ -602,7 +602,7 @@ Prompt: плоские категории + независимый словар�
 | `PRODUCT_NORMALIZER` | auto | groq/grok/gpt/auto |
 | `OPENAI_API_KEY`, `OPENAI_MODEL` | | GPT |
 | `GROK_API_KEY`, `GROK_MODEL`, `GROK_BASE_URL` | | xAI |
-| `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_BASE_URL` | | Groq |
+| `GROQ_API_KEY`, `GROQ_MODEL`, `GROQ_BASE_URL` | `GROQ_MODEL` default: `openai/gpt-oss-20b` (Llama 3.3 на Groq — Enterprise) |
 | `APP_DEBUG` | false | SQL echo |
 | `CORS_ORIGINS` | | доп. origins через запятую |
 

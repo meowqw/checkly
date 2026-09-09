@@ -1,11 +1,13 @@
 import type { Category, Transaction } from "@/api/client";
 import { resolveCategoryColor } from "@/lib/category-icons";
 
-/** Категории нужного типа (плоский список). */
+/** Категории нужного типа (плоский список). Чаще используемые — выше. */
 export function getRootCategories(categories: Category[], type: string): Category[] {
   return categories
     .filter((c) => c.type === type)
     .sort((a, b) => {
+      const usageDiff = (b.usage_count ?? 0) - (a.usage_count ?? 0);
+      if (usageDiff !== 0) return usageDiff;
       const aCustom = a.is_custom ? 1 : 0;
       const bCustom = b.is_custom ? 1 : 0;
       if (aCustom !== bCustom) return aCustom - bCustom;

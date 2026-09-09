@@ -1,8 +1,8 @@
 """Репозиторий категорий (плоские)."""
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
-from app.database.models import Category
+from app.database.models import Category, Transaction, TransactionItem
 
 
 class CategoryRepository:
@@ -24,13 +24,29 @@ class CategoryRepository:
             select(Category).where(Category.uid == uid, Category.user_id == user_id)
         )
 
-    def list_for_user(self, user_id: int) -> list[Category]:
-        stmt = (
-            select(Category)
-            .where(or_(Category.user_id.is_(None), Category.user_id == user_id))
-            .order_by(Category.type, Category.name)
+    def list_for_user(self, user_id: int) -> list[tuple[Category, int]]:
+        """Системные + свои; usage_count по позициям пользователя; чаще используемые выше."""
+        usage_subq = (
+            select(
+                TransactionItem.category_id.label("category_id"),
+                func.count().label("usage_count"),
+            )
+            .join(Transaction, Transaction.id == TransactionItem.transaction_id)
+            .where(
+                Transaction.user_id == user_id,
+                TransactionItem.category_id.is_not(None),
+            )
+            .group_by(TransactionItem.category_id)
+            .subquery()
         )
-        return list(self._db.scalars(stmt).all())
+        usage_count = func.coalesce(usage_subq.c.usage_count, 0)
+        stmt = (
+            select(Category, usage_count)
+            .outerjoin(usage_subq, usage_subq.c.category_id == Category.id)
+            .where(or_(Category.user_id.is_(None), Category.user_id == user_id))
+            .order_by(Category.type, usage_count.desc(), Category.name)
+        )
+        return [(row[0], int(row[1])) for row in self._db.execute(stmt).all()]
 
     def find_system_by_name_and_type(self, name: str, category_type: str) -> Category | None:
         stmt = select(Category).where(

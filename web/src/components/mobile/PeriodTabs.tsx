@@ -5,6 +5,7 @@ const LABELS: Record<Period, string> = {
   day: "День",
   week: "Неделя",
   month: "Месяц",
+  custom: "Свои",
 };
 
 type Props = {
@@ -15,14 +16,14 @@ type Props = {
 
 export function PeriodTabs({ value, onChange, className }: Props) {
   return (
-    <div className={cn("flex gap-1 border-b border-neutral-100", className)}>
+    <div className={cn("flex gap-0.5 overflow-x-auto border-b border-neutral-100", className)}>
       {(Object.keys(LABELS) as Period[]).map((p) => (
         <button
           key={p}
           type="button"
           onClick={() => onChange(p)}
           className={cn(
-            "relative px-3 py-2 text-sm font-medium transition",
+            "relative shrink-0 px-2.5 py-2 text-sm font-medium transition",
             value === p ? "text-brand" : "text-neutral-400"
           )}
         >

@@ -5,11 +5,12 @@ type Props = {
   icon?: string | null;
   color?: string | null;
   name?: string;
-  size?: "sm" | "md" | "lg";
+  size?: "xs" | "sm" | "md" | "lg";
   className?: string;
 };
 
 const SIZE = {
+  xs: { box: "h-6 w-6", icon: 12 },
   sm: { box: "h-7 w-7", icon: 14 },
   md: { box: "h-9 w-9", icon: 18 },
   lg: { box: "h-11 w-11", icon: 22 },

@@ -21,7 +21,11 @@ _AUTH_ERRORS = {401: COMMON_ERROR_RESPONSES[401]}
     "",
     response_model=CategoriesListResponseDTO,
     summary="Список категорий",
-    description="Плоский список системных и пользовательских категорий (без иерархии).",
+    description=(
+        "Плоский список системных и пользовательских категорий (без иерархии).\n\n"
+        "Каждая категория содержит `usage_count` (число позиций пользователя). "
+        "Сортировка: тип → частота ↓ → имя."
+    ),
     responses=_AUTH_ERRORS,
 )
 def list_categories(db: DbSession, user: CurrentUser) -> CategoriesListResponseDTO:

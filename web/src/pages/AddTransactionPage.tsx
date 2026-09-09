@@ -120,10 +120,10 @@ export default function AddTransactionPage() {
         </p>
       )}
 
-      <form onSubmit={submit} className="space-y-4">
-        <label className="block">
+      <form onSubmit={submit} className="space-y-3">
+        <label className="flex items-baseline gap-2">
           <input
-            className="w-full border-0 bg-transparent py-2 text-4xl font-bold tabular-nums outline-none placeholder:text-neutral-300"
+            className="min-w-0 flex-1 border-0 bg-transparent py-1 text-2xl font-bold tabular-nums outline-none placeholder:text-neutral-300"
             type="number"
             step="0.01"
             min="0.01"
@@ -133,7 +133,7 @@ export default function AddTransactionPage() {
             required
             autoFocus
           />
-          <span className="text-sm text-neutral-400">₽</span>
+          <span className="shrink-0 text-sm text-neutral-400">₽</span>
         </label>
 
         <div className="flex border-b border-neutral-100">
@@ -143,7 +143,7 @@ export default function AddTransactionPage() {
               type="button"
               onClick={() => setType(t)}
               className={cn(
-                "relative flex-1 py-2 text-sm font-medium",
+                "relative flex-1 py-1.5 text-sm font-medium",
                 type === t ? "text-brand" : "text-neutral-400"
               )}
             >
@@ -157,9 +157,9 @@ export default function AddTransactionPage() {
 
         {accounts.length > 1 && (
           <label className="block">
-            <span className="mb-1.5 block text-xs text-neutral-500">Счёт</span>
+            <span className="mb-1 block text-xs text-neutral-500">Счёт</span>
             <select
-              className="input-field"
+              className="input-field py-2"
               value={accountId}
               onChange={(e) => setAccountId(e.target.value)}
             >
@@ -188,7 +188,7 @@ export default function AddTransactionPage() {
             </button>
           </div>
           <input
-            className="input-field"
+            className="input-field py-2"
             type="datetime-local"
             value={occurredAt}
             onChange={(e) => setOccurredAt(e.target.value)}
@@ -199,7 +199,7 @@ export default function AddTransactionPage() {
         <label className="block">
           <span className="mb-1 block text-xs text-neutral-500">Комментарий</span>
           <input
-            className="input-field"
+            className="input-field py-2"
             placeholder="Обед, такси..."
             value={comment}
             onChange={(e) => setComment(e.target.value)}
